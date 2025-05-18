@@ -1,7 +1,9 @@
 export PS1='%n@%m %1~ %# '
+alias nvim-kickstart="NVIM_APPNAME=nvim-kickstart; nvim"
+export NVIM_APPNAME=nvim
 
-# aliases
 alias ls="ls -a"
+alias custom_dockerlast="docker ps -lq"
 
 # custom helper functions
 my-add-path-directory() {
