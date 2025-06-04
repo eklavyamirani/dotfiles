@@ -26,3 +26,5 @@ my-add-path-directory() {
 }
 
 eval "$(/opt/homebrew/bin/brew shellenv)"
+
+my-add-path-directory ~/.docker/bin
