@@ -19,10 +19,10 @@ if [ -s $(brew --prefix nvm)/nvm.sh ]; then
   # Setup NVM
   export NVM_DIR="$HOME/.nvm"
   # This loads nvm
-  [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"
+  [ -s "$(brew --prefix nvm)/nvm.sh" ] && \. "$(brew --prefix nvm)/nvm.sh"
 
   # This loads nvm bash_completion
-  [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
+  [ -s "$(brew --prefix nvm)/etc/bash_completion.d/nvm" ] && \. "$(brew --prefix nvm)/etc/bash_completion.d/nvm"
 else
   # Display a warning if nvm is not installed via Homebrew
   echo "Warning: nvm (Node Version Manager) not found."
