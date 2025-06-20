@@ -38,3 +38,7 @@ my-add-path-directory() {
         echo "$1 is not a valid directory"
     fi
 }
+
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+my-add-path-directory ~/.docker/bin
