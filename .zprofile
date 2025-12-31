@@ -15,6 +15,8 @@ export NVIM_APPNAME=nvim
 alias ls="ls -a"
 alias custom_dockerlast="docker ps -lq"
 
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
 if [ -s $(brew --prefix nvm)/nvm.sh ]; then
   # Setup NVM
   export NVM_DIR="$HOME/.nvm"
@@ -38,7 +40,5 @@ my-add-path-directory() {
         echo "$1 is not a valid directory"
     fi
 }
-
-eval "$(/opt/homebrew/bin/brew shellenv)"
 
 my-add-path-directory ~/.docker/bin
