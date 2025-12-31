@@ -1,5 +1,3 @@
-export PS1='%n@%m %1~ %# '
-
 # set nvim as the default editor
 export EDITOR='nvim'
 
