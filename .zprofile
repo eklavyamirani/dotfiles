@@ -10,10 +10,27 @@ export HISTCONTROL='ignoreboth';
 alias nvim-kickstart="NVIM_APPNAME=nvim-kickstart; nvim"
 export NVIM_APPNAME=nvim
 
+localClaude() {
+  if [[ ! "$*" =~ "--model" ]]; then
+    echo "Missing --model! (try using --model unsloth/Qwen3.5-35B-A3B or unsloth/Qwen3-Coder-Next-GGUF)"
+    return 1
+  fi
+
+  export ANTHROPIC_BASE_URL=http://localhost:8001
+  export ANTHROPIC_API_KEY='sk-no-key-required'
+  claude --settings ~/.claude-local/settings.json "$@"
+}
+
 alias ls="ls -a"
 alias custom_dockerlast="docker ps -lq"
 
 eval "$(/opt/homebrew/bin/brew shellenv)"
+# Add Homebrew's completions to the shell path
+if type brew &>/dev/null; then
+  FPATH=$(brew --prefix)/share/zsh/site-functions:$FPATH
+  autoload -Uz compinit
+  compinit
+fi
 
 if [ -s $(brew --prefix nvm)/nvm.sh ]; then
   # Setup NVM

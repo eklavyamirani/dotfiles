@@ -4,3 +4,5 @@
 # %~ - Displays the relative path of the current directory.
 # %# - Displays a "%" for regular users or a "#" if running as root.
 export PS1="|%F{green}%n@%m%f|%F{green}%~%f|"$'\n'" %# > "
+
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
