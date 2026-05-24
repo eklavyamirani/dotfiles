@@ -27,7 +27,6 @@ localClaude() {
 }
 
 alias ls="ls -a"
-alias custom_dockerlast="docker ps -lq"
 
 eval "$(/opt/homebrew/bin/brew shellenv)"
 # Add Homebrew's completions to the shell path
