@@ -1,0 +1,22 @@
+{
+  // Custom models for pi coding agent
+  // Docs: https://github.com/earendil-works/pi-mono/packages/ai
+  "providers": {
+    "llama": {
+      "baseUrl": "http://localhost:8001/v1",
+      "apiKey": "sk-no-key-required",
+      "models": [
+        {
+          "id": "qwen3.6-27b",
+          "name": "Qwen3.6-27B (local, UD-Q4_K_XL + MTP)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 65536,
+          "maxTokens": 65536
+        }
+      ]
+    }
+  }
+}

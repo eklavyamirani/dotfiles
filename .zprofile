@@ -21,6 +21,11 @@ localClaude() {
   claude --settings ~/.claude-local/settings.json "$@"
 }
 
+# Local Qwen3.6 via pi coding agent
+alias ask='pi --model llama/qwen3.6-27b --thinking off -p'
+alias ask-think='pi --model llama/qwen3.6-27b -p'
+alias pi-local='pi --model llama/qwen3.6-27b'
+
 alias ls="ls -a"
 alias custom_dockerlast="docker ps -lq"
 
