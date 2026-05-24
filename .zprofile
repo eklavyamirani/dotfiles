@@ -63,7 +63,6 @@ enable-node() {
     return 1
   fi
 
-  unset -f node npm npx
   if [ -s $(brew --prefix nvm)/nvm.sh ]; then
     # Setup NVM
     export NVM_DIR="$HOME/.nvm"
