@@ -1,28 +1,62 @@
-### To use the config on an existing system
-Update the submodule. ```git submodule update --remote --merge```
-Commit
-Use diff to compare the files between local and the git repo.
-Since symlinks aren't set correctly, we need to restow. 
-```stow -R -t ~/ -n -v .```
-Remove the current files on the host
-Run the stow command without -n.
+# dotfiles
 
----
+Stow-based dotfiles, split into two account profiles:
 
-### Prerequisites
+- **`admin/`** — the main/admin macOS account. Intentionally minimal: no
+  Homebrew, no language runtimes, no dev tooling. Just shell basics and a
+  `dev-shell` helper to `su` into the isolated dev account.
+- **`dev/`** — an isolated, non-admin account that owns all development
+  tooling (Homebrew installed to `~/.homebrew`, no sudo required; mise;
+  neovim; pi/llama-server configs).
 
-These tools must be installed separately (not managed by stow):
+## Deploy
 
-| Tool | Install | Purpose |
-|------|---------|---------|
-| [Homebrew](https://brew.sh) | `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` | Package manager |
-| nvm | `brew install nvm` | Node version manager |
-| Node.js | `nvm install --lts` | Runtime for pi agent |
-| [Hugging Face CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) | `brew install hf` | Model downloads |
+On the admin account:
+```bash
+git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
+stow -t ~ admin
+```
+
+On the isolated dev account (see "Bootstrap a new dev account" below first):
+```bash
+git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
+git submodule update --init --remote
+stow -t ~ dev
+```
+
+To re-stow after changes (symlinks not set correctly):
+```bash
+stow -R -t ~ -n -v dev   # dry run, review diffs
+stow -R -t ~ dev         # apply
+```
+
+## Bootstrap a new dev account (no sudo, ever)
+
+```bash
+# 1. Install Homebrew into this account's home directory only
+git clone https://github.com/Homebrew/brew ~/.homebrew
+eval "$(~/.homebrew/bin/brew shellenv)"
+
+# 2. Install stow and mise
+brew install stow mise
+
+# 3. Clone dotfiles and stow the dev profile
+git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
+git submodule update --init --remote
+stow -t ~ dev
+
+# 4. Install the rest of the toolset
+brew bundle --file=dev/Brewfile
+```
+
+This account's Homebrew never touches `/opt/homebrew` or `/usr/local` and
+never requires an admin password. A startup tripwire in
+`dev/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
+compromised (e.g. another account's Homebrew leaks onto `PATH`).
 
 ### Local LLM setup (Qwen3.6-27B + pi agent)
 
-After stowing dotfiles, run these one-time steps:
+After stowing `dev`, run these one-time steps:
 
 ```bash
 # 1. Download the model (~18 GB)
@@ -53,4 +87,5 @@ ask "What does EINTR mean?"
 pi-local "Help me refactor this" @file.py
 ```
 
-Profiles: `coding` (default), `thinking`, `instruct`. See `~/.config/llama-server/README.md` for details.
+Profiles: `coding` (default), `thinking`, `instruct`. See
+`~/.config/llama-server/README.md` for details.

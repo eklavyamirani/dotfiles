@@ -1,0 +1,31 @@
+# Brewfile for the isolated dev account's Homebrew (~/.homebrew).
+# Usage:
+#   brew bundle --file=dev/Brewfile           # install everything below
+#   brew bundle cleanup --file=dev/Brewfile --force  # remove anything not listed
+
+# ---- CLI essentials ----
+brew "git"          # likely newer than the system git
+brew "gh"           # GitHub CLI
+brew "fzf"          # fuzzy finder
+brew "ripgrep"      # fast recursive grep
+brew "jq"           # JSON processor
+brew "wget"
+brew "htop"
+brew "tree"
+brew "stow"         # dotfiles symlink management
+brew "mise"         # per-project language/tool version manager
+
+# ---- Editor ----
+brew "neovim"
+
+# ---- Containers (optional; comment out if unneeded) ----
+brew "colima"
+brew "docker"
+brew "docker-compose"
+
+# ---- Model tooling (optional; used by local LLM / pi agent setup) ----
+brew "hf"
+
+# ---- Casks (GUI apps) ----
+# cask "visual-studio-code"
+# cask "obsidian"
