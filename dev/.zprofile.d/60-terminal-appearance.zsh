@@ -10,9 +10,10 @@ if [[ "$TERM_PROGRAM" == "Apple_Terminal" && -o interactive ]]; then
 
   _claude_terminal_profile="Claude-Dev"
 
-  # Create the settings set once if it doesn't already exist, with a
-  # deliberately jarring color scheme so it's impossible to mistake for a
-  # normal shell.
+  # Create the settings set once if it doesn't already exist. Colors are a
+  # starting point only — feel free to edit them directly in Terminal >
+  # Settings > Profiles > Claude-Dev; this block won't touch it again once
+  # it exists.
   if ! osascript -e "tell application \"Terminal\" to exists settings set \"$_claude_terminal_profile\"" 2>/dev/null | grep -q true; then
     osascript > /dev/null 2>&1 << EOF
 tell application "Terminal"
