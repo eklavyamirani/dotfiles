@@ -39,13 +39,18 @@ stow -t ~ admin
 
 ### Bootstrap + deploy dev profile (isolated non-admin account)
 ```bash
-git clone https://github.com/Homebrew/brew ~/.homebrew
-eval "$(~/.homebrew/bin/brew shellenv)"
-brew install stow mise
-stow -t ~ dev
-sync-external-repos
-brew bundle --file=dev/Brewfile
+git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
+./bootstrap.sh
 ```
+`bootstrap.sh` (repo root -- deliberately not in `dev/.local/bin`, since it
+runs `stow` itself and can't depend on `stow` having already run) is a
+generic step-runner; the actual steps (Homebrew install, `stow`, `mise`
+install, `sync-external-repos`, `brew bundle`) are declared in
+`bootstrap-steps.json`, not hardcoded in the script. Each step's `command`
+runs via `eval` in the same process (not a subshell) so env/`PATH` changes
+persist across steps; `skip_if` allows idempotent skip conditions. Halts on
+first failure; every step's output is logged to
+`~/.local/state/dotfiles/setup-<timestamp>.log`.
 
 ## Configuration Structure
 

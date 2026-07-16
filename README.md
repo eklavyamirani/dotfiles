@@ -33,21 +33,39 @@ stow -R -t ~ dev         # apply
 ## Bootstrap a new dev account (no sudo, ever)
 
 ```bash
-# 1. Install Homebrew into this account's home directory only
-git clone https://github.com/Homebrew/brew ~/.homebrew
-eval "$(~/.homebrew/bin/brew shellenv)"
-
-# 2. Install stow and mise
-brew install stow mise
-
-# 3. Clone dotfiles and stow the dev profile
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
-stow -t ~ dev
-sync-external-repos
-
-# 4. Install the rest of the toolset
-brew bundle --file=dev/Brewfile
+./bootstrap.sh
 ```
+
+`bootstrap.sh` is a generic, declarative step-runner: the actual steps
+(Homebrew install, `stow`, `mise`/`stow` install, `sync-external-repos`,
+`brew bundle`) live in `bootstrap-steps.json`, not hardcoded in the script.
+To change what bootstrap does, edit that manifest -- `bootstrap.sh` itself
+shouldn't need touching. Each step entry has:
+
+```json
+{
+  "name": "install Homebrew into ~/.homebrew",
+  "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
+  "skip_if": "[ -d \"$HOME/.homebrew\" ]",
+  "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local"
+}
+```
+
+- `name`, `command` -- required. `command` is a shell string run via
+  `eval` **in the same process** (not a subshell), so `export`/`PATH`
+  changes from one step (e.g. loading Homebrew's `shellenv`) persist to
+  later steps, the way sourcing would in an interactive shell.
+- `skip_if` -- optional shell condition; if it exits `0`, the step is
+  skipped (e.g. "already installed" checks).
+- `purpose` -- optional, shown in logs.
+
+It halts immediately on the first failing step (later steps depend on
+earlier ones succeeding), and writes a full transcript of every step's
+output to `~/.local/state/dotfiles/setup-<timestamp>.log` regardless of
+outcome, so a failure always leaves you with complete detail to diagnose.
+Every step is
+idempotent (or guarded by `skip_if`), so it's always safe to fix the issue and rerun.
 
 This account's Homebrew never touches `/opt/homebrew` or `/usr/local` and
 never requires an admin password. A startup tripwire in

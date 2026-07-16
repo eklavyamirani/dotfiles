@@ -1,0 +1,38 @@
+[
+  {
+    "name": "install Homebrew into ~/.homebrew",
+    "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
+    "skip_if": "[ -d \"$HOME/.homebrew\" ]",
+    "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local, no sudo required"
+  },
+  {
+    "name": "load Homebrew into this shell",
+    "command": "eval \"$(\"$HOME/.homebrew/bin/brew\" shellenv)\"",
+    "skip_if": "",
+    "purpose": "Puts brew on PATH for every step below (stow, mise, brew bundle)"
+  },
+  {
+    "name": "install stow and mise",
+    "command": "brew install stow mise",
+    "skip_if": "",
+    "purpose": ""
+  },
+  {
+    "name": "stow dev profile",
+    "command": "stow -d \"$REPO_DIR\" -t \"$HOME\" dev",
+    "skip_if": "",
+    "purpose": "Symlinks dev/ into $HOME, including ~/.local/bin/sync-external-repos"
+  },
+  {
+    "name": "sync external repos (e.g. nvim config)",
+    "command": "\"$HOME/.local/bin/sync-external-repos\"",
+    "skip_if": "",
+    "purpose": ""
+  },
+  {
+    "name": "install Brewfile packages",
+    "command": "brew bundle --file=\"$REPO_DIR/dev/Brewfile\"",
+    "skip_if": "",
+    "purpose": ""
+  }
+]
