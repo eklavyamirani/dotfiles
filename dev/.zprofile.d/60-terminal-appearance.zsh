@@ -27,7 +27,12 @@ tell application "Terminal"
     set normal text color to {${CLAUDE_TERM_NORMAL_TEXT:-60000, 60000, 60000}}
     set bold text color to {${CLAUDE_TERM_BOLD_TEXT:-65535, 55000, 0}}
     set cursor color to {${CLAUDE_TERM_CURSOR:-65535, 30000, 0}}
+    set font to "${CLAUDE_TERM_FONT:-Menlo-Regular}"
   end tell
+  -- "size" alone is AppleScript-ambiguous and errors from inside a nested
+  -- "tell settings set" block (Terminal error -10006); "font size" is the
+  -- real settable property name and works fine flat, outside the tell block.
+  set font size of settings set "$_claude_terminal_profile" to ${CLAUDE_TERM_FONT_SIZE:-12}
 end tell
 EOF
   fi
@@ -70,7 +75,7 @@ claude-dev-export-terminal-profile() {
     return 1
   fi
 
-  local bg normal bold cursor
+  local bg normal bold cursor font fontsize
   bg="$(osascript -e 'tell application "Terminal" to get background color of settings set "Claude-Dev"' 2>/dev/null)"
   if [[ -z "$bg" ]]; then
     echo "Claude-Dev settings set not found." >&2
@@ -79,21 +84,37 @@ claude-dev-export-terminal-profile() {
   normal="$(osascript -e 'tell application "Terminal" to get normal text color of settings set "Claude-Dev"' 2>/dev/null)"
   bold="$(osascript -e 'tell application "Terminal" to get bold text color of settings set "Claude-Dev"' 2>/dev/null)"
   cursor="$(osascript -e 'tell application "Terminal" to get cursor color of settings set "Claude-Dev"' 2>/dev/null)"
+  font="$(osascript -e 'tell application "Terminal" to get font of settings set "Claude-Dev"' 2>/dev/null)"
+  # "size" alone is AppleScript-ambiguous (get size of settings set errors),
+  # so pull it out of the full properties record's text representation.
+  local props
+  props="$(osascript -e 'tell application "Terminal" to get properties of settings set "Claude-Dev"' 2>/dev/null)"
+  fontsize="$(echo "$props" | sed -E 's/.*, size:([0-9]+),.*/\1/')"
 
   cat > "$conf" << EOF
-# Color values for the dev account's "Claude-Dev" Terminal.app settings set.
-# Each value is an AppleScript RGB triple (0-65535 per channel), matching
+# Color/font values for the dev account's "Claude-Dev" Terminal.app settings
+# set. Colors are AppleScript RGB triples (0-65535 per channel), matching
 # what \`tell application "Terminal" to get properties of settings set\` returns.
 #
-# Regenerate this file after tweaking colors in Terminal > Settings >
+# NOTE: background opacity/transparency is NOT captured here -- Terminal.app's
+# AppleScript dictionary has no scriptable opacity/alpha property (confirmed
+# via \`sdef\`), so it can't be exported or replayed automatically. If you
+# want the opacity to travel with this repo too, use Terminal's own native
+# export instead: Settings > Profiles > (gear icon) > Export "Claude-Dev"...,
+# save it as dev/.config/terminal/Claude-Dev.terminal, commit it, and import
+# it via Settings > Profiles > (gear icon) > Import... on the new machine.
+#
+# Regenerate this file after tweaking colors/font in Terminal > Settings >
 # Profiles > Claude-Dev by running: claude-dev-export-terminal-profile
 
 CLAUDE_TERM_BACKGROUND="$bg"
 CLAUDE_TERM_NORMAL_TEXT="$normal"
 CLAUDE_TERM_BOLD_TEXT="$bold"
 CLAUDE_TERM_CURSOR="$cursor"
+CLAUDE_TERM_FONT="$font"
+CLAUDE_TERM_FONT_SIZE="$fontsize"
 EOF
 
-  echo "Exported Claude-Dev colors to $conf"
+  echo "Exported Claude-Dev colors/font to $conf"
   echo "Don't forget to: cd ~/repositories/dotfiles && git add -A && git commit && git push"
 }
