@@ -167,6 +167,18 @@ failed pull (e.g. local edits blocking a fast-forward) is reported and left
 completely untouched, never auto-reverted. A summary is printed at the end
 and the exit code is non-zero if anything failed.
 
+### `dev/.config` is allowlisted, not blocklisted
+
+`.gitignore` ignores all of `dev/.config/*` by default and explicitly
+un-ignores only the specific configs meant to be tracked (currently
+`terminal/`, `llama-server/`, `external-repos.json`). This is deliberate:
+many CLI tools write credential/token files into their `~/.config/<tool>`
+directory over time (OAuth tokens, API keys, session state), and a
+blocklist approach requires remembering to add every such path -- one
+missed entry and a `git add -A` silently commits a secret. To track a new
+tool's config, add explicit `!dev/.config/<tool>/` and
+`!dev/.config/<tool>/**` un-ignore lines to `.gitignore`.
+
 ### Local LLM setup (Qwen3.6-27B + pi agent)
 
 After stowing `dev`, run these one-time steps:

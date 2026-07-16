@@ -5,13 +5,8 @@
 
 # ---- CLI essentials ----
 brew "git"          # likely newer than the system git
-brew "gh"           # GitHub CLI
 brew "fzf"          # fuzzy finder
 brew "ripgrep"      # fast recursive grep
-brew "jq"           # JSON processor
-brew "wget"
-brew "htop"
-brew "tree"
 brew "stow"         # dotfiles symlink management
 brew "mise"         # per-project language/tool version manager
 

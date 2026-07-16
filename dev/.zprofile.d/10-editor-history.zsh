@@ -7,10 +7,9 @@ export HISTFILESIZE="${HISTSIZE}";
 # Omit duplicates and commands that begin with a space from history.
 export HISTCONTROL='ignoreboth';
 
-alias nvim-kickstart="NVIM_APPNAME=nvim-kickstart; nvim"
 export NVIM_APPNAME=nvim
 
-alias ls="ls -a"
+alias ls="ls -la"
 
 # custom helper functions
 my-add-path-directory() {
@@ -21,5 +20,3 @@ my-add-path-directory() {
         echo "$1 is not a valid directory"
     fi
 }
-
-my-add-path-directory ~/.docker/bin
