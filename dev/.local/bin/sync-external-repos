@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Idempotently sync repos listed in ~/.config/external-repos.json.
+#
+# - Missing local_dir  -> git clone
+# - Existing local_dir -> git pull --ff-only (never resets, never touches
+#   local changes; if a fast-forward isn't possible -- e.g. you have local
+#   edits -- this reports the failure and leaves that repo untouched)
+#
+# To track a new repo: add an entry to external-repos.json and rerun this
+# script. Only the new entry gets cloned; existing entries are just pulled.
+#
+# No pinning: this always tracks the tip of whatever branch you configure
+# (or the repo's default branch), unlike a git submodule.
+#
+# Failure handling: entries are independent (no shared transaction), so one
+# failing entry does NOT halt the rest -- every entry is attempted, failures
+# are logged, and a summary is printed at the end. Exit status is non-zero
+# if anything failed, so this is safe to use in scripts/CI. Nothing is ever
+# auto-reverted: a failed clone's partial directory is cleaned up (nothing
+# of value was there yet), but a failed pull leaves the existing repo
+# exactly as it was -- your local state is never clobbered automatically.
+set -uo pipefail
+
+MANIFEST="${1:-$HOME/.config/external-repos.json}"
+LOG_TAG="sync-external-repos"
+
+log()  { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+fail() { printf '[%s] ERROR: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+
+if [ ! -f "$MANIFEST" ]; then
+  fail "manifest not found: $MANIFEST"
+  exit 1
+fi
+
+# python3 ships with macOS's Command Line Tools -- no brew/pip install needed.
+if ! parsed=$(python3 -c '
+import json, sys, os
+
+with open(sys.argv[1]) as f:
+    entries = json.load(f)
+
+for entry in entries:
+    repo = entry["repo"]
+    local_dir = os.path.expanduser(entry["local_dir"])
+    purpose = entry.get("purpose", "")
+    branch = entry.get("branch") or ""
+    git_options = " ".join(entry.get("git_options") or [])
+    print("\x1f".join([repo, local_dir, purpose, branch, git_options]))
+' "$MANIFEST" 2>&1); then
+  fail "could not parse manifest (invalid JSON?): $MANIFEST"
+  printf '%s\n' "$parsed" >&2
+  exit 1
+fi
+
+succeeded=()
+failed=()
+
+while IFS=$'\x1f' read -r repo local_dir purpose branch git_options; do
+  [ -z "$repo" ] && continue
+  log "==> $local_dir"
+  [ -n "$purpose" ] && log "    purpose: $purpose"
+
+  if [ -d "$local_dir/.git" ]; then
+    log "    already cloned, pulling latest (ff-only)..."
+    # shellcheck disable=SC2086 -- word-splitting extra flags is intentional
+    if git -C "$local_dir" pull --ff-only $git_options; then
+      succeeded+=("$local_dir")
+    else
+      fail "pull failed for $local_dir -- left untouched, check for local changes or a diverged branch"
+      failed+=("$local_dir")
+    fi
+  else
+    log "    cloning..."
+    mkdir -p "$(dirname "$local_dir")"
+    # shellcheck disable=SC2086 -- word-splitting extra flags is intentional
+    if git clone ${branch:+-b "$branch"} $git_options "$repo" "$local_dir"; then
+      succeeded+=("$local_dir")
+    else
+      fail "clone failed for $local_dir -- removing partial directory"
+      rm -rf "$local_dir"
+      failed+=("$local_dir")
+    fi
+  fi
+done <<< "$parsed"
+
+log "summary: ${#succeeded[@]} succeeded, ${#failed[@]} failed"
+if [ "${#failed[@]}" -gt 0 ]; then
+  for d in "${failed[@]}"; do
+    fail "  failed: $d"
+  done
+  exit 1
+fi
+exit 0

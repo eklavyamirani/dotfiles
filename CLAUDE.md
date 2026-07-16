@@ -23,7 +23,12 @@ non-admin dev account that owns all development tooling.
     (a thin loader). Add new snippets here rather than editing `.zprofile`
     directly.
   - `Brewfile` — the curated package list for `brew bundle`.
-  - Neovim config (git submodule), pi agent / llama-server configs.
+  - `external-repos.json` + `sync-external-repos` — declarative manifest
+    and idempotent sync script for repos that live outside `dotfiles`
+    (currently just the Neovim config), so they stay deployable standalone
+    on machines that don't want the rest of this repo. No commit pinning —
+    always tracks the tip of the configured branch. Not a git submodule.
+  - Neovim config (external repo, see above), pi agent / llama-server configs.
 
 ## Setup Instructions
 
@@ -37,8 +42,8 @@ stow -t ~ admin
 git clone https://github.com/Homebrew/brew ~/.homebrew
 eval "$(~/.homebrew/bin/brew shellenv)"
 brew install stow mise
-git submodule update --init --remote
 stow -t ~ dev
+sync-external-repos
 brew bundle --file=dev/Brewfile
 ```
 
@@ -55,7 +60,7 @@ brew bundle --file=dev/Brewfile
   a `brew()` function pinning to `~/.homebrew` regardless of PATH ordering,
   and a startup tripwire warning if isolation is ever compromised
 
-### Neovim Configuration (`dev/.config/nvim`, git submodule)
+### Neovim Configuration (`dev/.config/nvim`, external repo via `sync-external-repos`)
 - **`init.lua`** - Main initialization file with basic settings and keymaps
 - **`lua/config/plugins.lua`** - Plugin declarations and setup via vim-plug
 

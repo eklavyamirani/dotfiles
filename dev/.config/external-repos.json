@@ -1,0 +1,9 @@
+[
+  {
+    "repo": "https://github.com/eklavyamirani/nvim-config",
+    "local_dir": "~/.config/nvim",
+    "purpose": "Neovim configuration (kickstart-based, tracked in its own repo so it can be deployed standalone on machines that don't want the rest of dotfiles)",
+    "branch": null,
+    "git_options": []
+  }
+]

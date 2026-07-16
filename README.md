@@ -42,8 +42,8 @@ brew install stow mise
 
 # 3. Clone dotfiles and stow the dev profile
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
-git submodule update --init --remote
 stow -t ~ dev
+sync-external-repos
 
 # 4. Install the rest of the toolset
 brew bundle --file=dev/Brewfile
@@ -109,6 +109,45 @@ security lock-keychain ~/Library/Keychains/login.keychain-db
 
 The trailing `;` before the lock command ensures the keychain relocks even
 if `copilot` exits non-zero.
+
+### External repos (e.g. Neovim config)
+
+Some tools (currently just the Neovim config) live in their own repos
+instead of being tracked directly in `dotfiles`, so they can be deployed
+standalone on machines that don't want the rest of this repo. These are
+declared in `dev/.config/external-repos.json` (stowed to
+`~/.config/external-repos.json`) and synced with `sync-external-repos`
+(stowed to `~/.local/bin/sync-external-repos`, already on `PATH`):
+
+```json
+[
+  {
+    "repo": "https://github.com/eklavyamirani/nvim-config",
+    "local_dir": "~/.config/nvim",
+    "purpose": "Neovim configuration",
+    "branch": null,
+    "git_options": []
+  }
+]
+```
+
+- `repo`, `local_dir` -- required. `local_dir` can be named independently
+  of the repo (e.g. `nvim-config` deploys to `~/.config/nvim`).
+- `purpose` -- required, shown when the script runs.
+- `branch` -- optional; `null`/omitted uses the repo's default branch.
+- `git_options` -- optional array of extra flags appended to both `clone`
+  and `pull` (e.g. `["--depth=1"]`).
+
+Running `sync-external-repos` is fully idempotent: missing `local_dir`s are
+cloned, existing ones get `git pull --ff-only`. There's no commit pinning
+(unlike a git submodule) -- it always tracks the tip of whatever branch you
+configure. To track a new repo, just add an entry and rerun.
+
+Each entry is synced independently -- one failing entry doesn't halt the
+rest. A failed clone has its partial directory cleaned up automatically; a
+failed pull (e.g. local edits blocking a fast-forward) is reported and left
+completely untouched, never auto-reverted. A summary is printed at the end
+and the exit code is non-zero if anything failed.
 
 ### Local LLM setup (Qwen3.6-27B + pi agent)
 

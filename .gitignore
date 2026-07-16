@@ -1,1 +1,3 @@
 dev/.config/gh
+# nvim config is now managed by sync-external-repos, not tracked in this repo
+dev/.config/nvim
