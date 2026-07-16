@@ -9,20 +9,24 @@
 if [[ "$TERM_PROGRAM" == "Apple_Terminal" && -o interactive ]]; then
 
   _claude_terminal_profile="Claude-Dev"
+  _claude_terminal_profile_conf="$HOME/.config/terminal/claude-dev-profile.env"
 
-  # Create the settings set once if it doesn't already exist. Colors are a
-  # starting point only — feel free to edit them directly in Terminal >
-  # Settings > Profiles > Claude-Dev; this block won't touch it again once
-  # it exists.
+  # Create the settings set once if it doesn't already exist, importing
+  # colors from the version-controlled config below. Feel free to edit
+  # colors directly in Terminal > Settings > Profiles > Claude-Dev afterward
+  # — this block won't touch it again once it exists. Run
+  # `claude-dev-export-terminal-profile` to save such tweaks back to the
+  # config file so they're captured by git/stow.
   if ! osascript -e "tell application \"Terminal\" to exists settings set \"$_claude_terminal_profile\"" 2>/dev/null | grep -q true; then
+    [[ -f "$_claude_terminal_profile_conf" ]] && source "$_claude_terminal_profile_conf"
     osascript > /dev/null 2>&1 << EOF
 tell application "Terminal"
   make new settings set with properties {name:"$_claude_terminal_profile"}
   tell settings set "$_claude_terminal_profile"
-    set background color to {4000, 0, 0}
-    set normal text color to {60000, 60000, 60000}
-    set bold text color to {65535, 55000, 0}
-    set cursor color to {65535, 30000, 0}
+    set background color to {${CLAUDE_TERM_BACKGROUND:-4000, 0, 0}}
+    set normal text color to {${CLAUDE_TERM_NORMAL_TEXT:-60000, 60000, 60000}}
+    set bold text color to {${CLAUDE_TERM_BOLD_TEXT:-65535, 55000, 0}}
+    set cursor color to {${CLAUDE_TERM_CURSOR:-65535, 30000, 0}}
   end tell
 end tell
 EOF
@@ -49,3 +53,47 @@ EOF
 
   unset _claude_terminal_profile
 fi
+
+# Re-export the live Claude-Dev settings set's colors back into the
+# version-controlled config file, so manual tweaks made in Terminal >
+# Settings > Profiles > Claude-Dev get captured by git/stow. Run this after
+# tweaking, then commit + push from the dotfiles repo.
+claude-dev-export-terminal-profile() {
+  if [[ "$TERM_PROGRAM" != "Apple_Terminal" ]]; then
+    echo "Not running in Terminal.app; nothing to export." >&2
+    return 1
+  fi
+
+  local conf="$HOME/.config/terminal/claude-dev-profile.env"
+  if [[ ! -e "$conf" ]]; then
+    echo "$conf not found (stow the dev package first)." >&2
+    return 1
+  fi
+
+  local bg normal bold cursor
+  bg="$(osascript -e 'tell application "Terminal" to get background color of settings set "Claude-Dev"' 2>/dev/null)"
+  if [[ -z "$bg" ]]; then
+    echo "Claude-Dev settings set not found." >&2
+    return 1
+  fi
+  normal="$(osascript -e 'tell application "Terminal" to get normal text color of settings set "Claude-Dev"' 2>/dev/null)"
+  bold="$(osascript -e 'tell application "Terminal" to get bold text color of settings set "Claude-Dev"' 2>/dev/null)"
+  cursor="$(osascript -e 'tell application "Terminal" to get cursor color of settings set "Claude-Dev"' 2>/dev/null)"
+
+  cat > "$conf" << EOF
+# Color values for the dev account's "Claude-Dev" Terminal.app settings set.
+# Each value is an AppleScript RGB triple (0-65535 per channel), matching
+# what \`tell application "Terminal" to get properties of settings set\` returns.
+#
+# Regenerate this file after tweaking colors in Terminal > Settings >
+# Profiles > Claude-Dev by running: claude-dev-export-terminal-profile
+
+CLAUDE_TERM_BACKGROUND="$bg"
+CLAUDE_TERM_NORMAL_TEXT="$normal"
+CLAUDE_TERM_BOLD_TEXT="$bold"
+CLAUDE_TERM_CURSOR="$cursor"
+EOF
+
+  echo "Exported Claude-Dev colors to $conf"
+  echo "Don't forget to: cd ~/repositories/dotfiles && git add -A && git commit && git push"
+}
