@@ -11,6 +11,20 @@ export HISTFILESIZE="${HISTSIZE}";
 export HISTCONTROL='ignoreboth';
 
 # Switch into the isolated dev account (set DEV_USER if it's not "dev").
+#
+# Uses ssh, not su -- su keeps the dev shell as a descendant of THIS
+# Terminal.app process (owned by the admin account), which lets any process
+# running as the dev user send unauthenticated AppleScript/Apple Events back
+# to control this admin-owned Terminal.app (macOS resolves the "responsible
+# process" by walking up the ancestry chain, so it's treated as self-control
+# rather than app-to-app automation -- no permission prompt, no TCC gate).
+# Concretely: `osascript -e 'tell application "Terminal" to do script
+# "whoever"'` run from a su'd dev shell executes as the ADMIN account, a
+# full privilege escalation out of the isolated account. ssh forks a fresh
+# process tree (via sshd) with no Terminal.app ancestor, closing this off
+# entirely. Requires Remote Login enabled and restricted to the dev user
+# (System Settings > General > Sharing > Remote Login), and a key added to
+# the dev account's ~/.ssh/authorized_keys.
 dev-shell() {
-  su - "${DEV_USER:-dev}"
+  ssh -t "${DEV_USER:-dev}@localhost"
 }

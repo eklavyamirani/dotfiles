@@ -4,7 +4,7 @@ Stow-based dotfiles, split into two account profiles:
 
 - **`admin/`** — the main/admin macOS account. Intentionally minimal: no
   Homebrew, no language runtimes, no dev tooling. Just shell basics and a
-  `dev-shell` helper to `su` into the isolated dev account.
+  `dev-shell` helper to `ssh` into the isolated dev account.
 - **`dev/`** — an isolated, non-admin account that owns all development
   tooling (Homebrew installed to `~/.homebrew`, no sudo required; mise;
   neovim; pi/llama-server configs).
@@ -53,6 +53,39 @@ This account's Homebrew never touches `/opt/homebrew` or `/usr/local` and
 never requires an admin password. A startup tripwire in
 `dev/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
 compromised (e.g. another account's Homebrew leaks onto `PATH`).
+
+### Setting up `dev-shell` (SSH, not `su`)
+
+`dev-shell` uses `ssh claude@localhost`, not `su`. `su` keeps the dev shell
+as a descendant of the admin account's own Terminal.app process, and macOS
+resolves Apple Event "responsible process" permissions by walking up that
+ancestry — so a process running as the dev user can send unprompted
+AppleScript to the admin's Terminal.app (e.g. `do script "..."` runs as the
+admin account: a full privilege escalation out of the isolated account).
+`ssh` forks a fresh process tree via `sshd` with no Terminal.app ancestor,
+closing this off entirely. One-time setup, on the **admin** account:
+
+```bash
+# 1. Enable Remote Login, restricted to the dev account only
+sudo systemsetup -setremotelogin on
+sudo dseditgroup -o edit -a claude -t user com.apple.access_ssh
+
+# 2. Generate a key pair for the admin account (on this machine, not copied
+#    in from elsewhere) and authorize it for the dev account
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_dev -N ""
+ssh-copy-id -i ~/.ssh/id_ed25519_dev.pub claude@localhost
+
+# 3. Require key-based auth only (edit /etc/ssh/sshd_config as root)
+#    Match User claude
+#        PasswordAuthentication no
+sudo tee -a /etc/ssh/sshd_config <<'EOF'
+Match User claude
+    PasswordAuthentication no
+EOF
+sudo launchctl kickstart -k system/com.openssh.sshd
+```
+
+Then `dev-shell` (from `admin/.zprofile`) just works: `ssh -t claude@localhost`.
 
 ### Local LLM setup (Qwen3.6-27B + pi agent)
 

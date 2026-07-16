@@ -12,7 +12,10 @@ non-admin dev account that owns all development tooling.
 
 - **`admin/`** — deployed on the main/admin account. No Homebrew, no
   language runtimes, no dev tooling by design. Just shell basics (`.zshrc`,
-  `.zprofile`) and a `dev-shell` function to `su` into the dev account.
+  `.zprofile`) and a `dev-shell` function to `ssh` into the dev account
+  (not `su` — see `admin/.zprofile` for why: `su` shares process ancestry
+  with the admin's Terminal.app, letting the dev account send unprompted
+  Apple Events back to it).
 - **`dev/`** — deployed on the isolated non-admin dev account. Owns:
   - Homebrew, installed to `~/.homebrew` (never `/opt/homebrew` or
     `/usr/local`) — no sudo required to install or use.
