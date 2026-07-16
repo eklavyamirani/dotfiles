@@ -10,39 +10,28 @@ if [[ "$TERM_PROGRAM" == "Apple_Terminal" && -o interactive ]]; then
 
   _claude_terminal_profile="Claude-Dev"
   _claude_terminal_profile_conf="$HOME/.config/terminal/claude-dev-profile.env"
-  _claude_terminal_profile_file="$HOME/.config/terminal/Claude-Dev.terminal"
 
   # Create the settings set once if it doesn't already exist (this only
   # happens the first time Terminal.app launches after a full quit/restart --
   # the settings set only lives in Terminal's in-memory state and is never
   # written to ~/Library/Preferences/com.apple.Terminal.plist, so it doesn't
-  # survive Terminal actually quitting).
+  # survive Terminal actually quitting). Bootstraps colors/font/size from the
+  # config below via AppleScript, which can't capture background
+  # opacity/transparency (Terminal's AppleScript dictionary has no scriptable
+  # opacity property at all).
   #
-  # Prefer importing dev/.config/terminal/Claude-Dev.terminal if present --
-  # a real Terminal.app profile export (Settings > Profiles > gear icon >
-  # Export...), which captures font, size, colors, AND background
-  # opacity/transparency losslessly as binary NSColor/NSFont archives.
-  # Falls back to reconstructing colors/font/size from the plain-text
-  # claude-dev-profile.env via AppleScript (loses opacity -- Terminal's
-  # AppleScript dictionary has no scriptable opacity property at all) if no
-  # .terminal export exists yet.
+  # For full fidelity including opacity, manually import
+  # dev/.config/terminal/Claude-Dev.terminal once per machine via
+  # Terminal > Settings > Profiles > gear icon > Import...
   #
   # Feel free to tweak everything directly in Terminal > Settings > Profiles
   # > Claude-Dev afterward — this block won't touch it again once it exists.
-  # Run `claude-dev-export-terminal-profile` (env file, loses opacity) or
-  # re-export via Settings > Profiles > gear icon > Export... (full fidelity,
-  # overwrite dev/.config/terminal/Claude-Dev.terminal) to save tweaks back
-  # to git.
+  # Save tweaks back to git by re-running claude-dev-export-terminal-profile
+  # (colors/font/size) and/or re-exporting via Settings > Profiles > gear
+  # icon > Export... (overwrite Claude-Dev.terminal, full fidelity).
   if ! osascript -e "tell application \"Terminal\" to exists settings set \"$_claude_terminal_profile\"" 2>/dev/null | grep -q true; then
-    if [[ -f "$_claude_terminal_profile_file" ]]; then
-      # `open` always creates a new frontmost window to do the import;
-      # close it right away since it's not the shell that triggered this.
-      open "$_claude_terminal_profile_file"
-      sleep 1
-      osascript -e 'tell application "Terminal" to if (count of windows) > 0 then close window 1' > /dev/null 2>&1
-    else
-      [[ -f "$_claude_terminal_profile_conf" ]] && source "$_claude_terminal_profile_conf"
-      osascript > /dev/null 2>&1 << EOF
+    [[ -f "$_claude_terminal_profile_conf" ]] && source "$_claude_terminal_profile_conf"
+    osascript > /dev/null 2>&1 << EOF
 tell application "Terminal"
   make new settings set with properties {name:"$_claude_terminal_profile"}
   tell settings set "$_claude_terminal_profile"
@@ -58,7 +47,6 @@ tell application "Terminal"
   set font size of settings set "$_claude_terminal_profile" to ${CLAUDE_TERM_FONT_SIZE:-12}
 end tell
 EOF
-    fi
   fi
 
   # Remember the window's current profile so we can restore it on exit
