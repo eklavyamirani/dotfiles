@@ -26,5 +26,5 @@ export HISTCONTROL='ignoreboth';
 # (System Settings > General > Sharing > Remote Login), and a key added to
 # the dev account's ~/.ssh/authorized_keys.
 dev-shell() {
-  ssh -t "${DEV_USER:-dev}@localhost"
+  ssh -t "${DEV_USER:-dev}@127.0.0.1"
 }

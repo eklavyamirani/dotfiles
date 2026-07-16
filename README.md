@@ -56,7 +56,7 @@ compromised (e.g. another account's Homebrew leaks onto `PATH`).
 
 ### Setting up `dev-shell` (SSH, not `su`)
 
-`dev-shell` uses `ssh claude@localhost`, not `su`. `su` keeps the dev shell
+`dev-shell` uses `ssh claude@127.0.0.1`, not `su`. `su` keeps the dev shell
 as a descendant of the admin account's own Terminal.app process, and macOS
 resolves Apple Event "responsible process" permissions by walking up that
 ancestry — so a process running as the dev user can send unprompted
@@ -73,7 +73,7 @@ sudo dseditgroup -o edit -a claude -t user com.apple.access_ssh
 # 2. Generate a key pair for the admin account (on this machine, not copied
 #    in from elsewhere) and authorize it for the dev account
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_dev -N ""
-ssh-copy-id -i ~/.ssh/id_ed25519_dev.pub claude@localhost
+ssh-copy-id -i ~/.ssh/id_ed25519_dev.pub claude@127.0.0.1
 
 # 3. Require key-based auth only (edit /etc/ssh/sshd_config as root)
 #    Match User claude
@@ -85,7 +85,30 @@ EOF
 sudo launchctl kickstart -k system/com.openssh.sshd
 ```
 
-Then `dev-shell` (from `admin/.zprofile`) just works: `ssh -t claude@localhost`.
+Then `dev-shell` (from `admin/.zprofile`) just works: `ssh -t claude@127.0.0.1`.
+
+Note: use `127.0.0.1`, not `localhost` — macOS's `sshd_config` ships with
+`ListenAddress 127.0.0.1` (IPv4 only), so if `localhost` resolves to `::1`
+first on your machine, the connection will fail even with everything else
+configured correctly.
+
+### GitHub Copilot CLI login and the Keychain
+
+Under `dev-shell` (SSH), the session runs in the `Background` security
+session class, not `Aqua` — so macOS Keychain writes fail with "User
+interaction is not allowed," and `copilot` offers to save the auth token as
+plaintext instead. To use the login Keychain, unlock it first (prompts for
+the dev account's password), then relock it right after so it doesn't stay
+unlocked indefinitely:
+
+```bash
+security unlock-keychain ~/Library/Keychains/login.keychain-db && \
+copilot; \
+security lock-keychain ~/Library/Keychains/login.keychain-db
+```
+
+The trailing `;` before the lock command ensures the keychain relocks even
+if `copilot` exits non-zero.
 
 ### Local LLM setup (Qwen3.6-27B + pi agent)
 
