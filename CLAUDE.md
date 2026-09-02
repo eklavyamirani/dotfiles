@@ -34,6 +34,7 @@ non-admin dev account that owns all development tooling.
 
 ### Deploy admin profile (main account)
 ```bash
+./prepare-stow-targets.sh admin ~
 stow -t ~ admin
 ```
 
@@ -51,6 +52,10 @@ runs via `eval` in the same process (not a subshell) so env/`PATH` changes
 persist across steps; `skip_if` allows idempotent skip conditions. Halts on
 first failure; every step's output is logged to
 `~/.local/state/dotfiles/setup-<timestamp>.log`.
+
+Before Stow runs, `prepare-stow-targets.sh` creates real target directories
+so Stow links managed files individually instead of folding whole stateful
+directories (such as `~/.pi`) into the repository.
 
 ## Configuration Structure
 

@@ -18,10 +18,16 @@
     "purpose": ""
   },
   {
+    "name": "prepare stow target directories",
+    "command": "\"$REPO_DIR/prepare-stow-targets.sh\" dev \"$HOME\"",
+    "skip_if": "",
+    "purpose": "Forces file-level links so tools write runtime state into $HOME, not the dotfiles repository"
+  },
+  {
     "name": "stow dev profile",
     "command": "stow -d \"$REPO_DIR\" -t \"$HOME\" dev",
     "skip_if": "",
-    "purpose": "Symlinks dev/ into $HOME, including ~/.local/bin/sync-external-repos"
+    "purpose": "Symlinks individual managed files into $HOME, including ~/.local/bin/sync-external-repos"
   },
   {
     "name": "sync external repos (e.g. nvim config)",

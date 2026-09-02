@@ -9,6 +9,14 @@ export HISTCONTROL='ignoreboth';
 
 export NVIM_APPNAME=nvim
 
+nvim() {
+  if [[ -n "$SSH_CONNECTION" && -z "$TERM_PROGRAM" ]]; then
+    TERM_PROGRAM=Apple_Terminal command nvim "$@"
+  else
+    command nvim "$@"
+  fi
+}
+
 alias ls="ls -la"
 
 # custom helper functions

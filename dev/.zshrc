@@ -1,3 +1,6 @@
+# Managed by GNU Stow. Keep this file limited to interactive Zsh setup;
+# put environment, aliases, and helper functions in numbered .zprofile.d snippets.
+
 # %n - Displays the current username.
 # @  - Literal "@" character separator.
 # %m - Displays the short hostname (up to the first ".").

@@ -16,3 +16,10 @@ dev/.config/*
 !dev/.config/llama-server/**
 
 !dev/.config/external-repos.json
+
+# Pi agent runtime state may contain credentials, downloaded binaries,
+# session history, caches, and machine-local UI settings.
+dev/.pi/agent/*
+!dev/.pi/agent/models.json
+!dev/.pi/agent/prompts/
+!dev/.pi/agent/prompts/**

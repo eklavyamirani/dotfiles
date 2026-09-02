@@ -15,6 +15,8 @@
 # Only does anything when running inside Apple's Terminal.app — harmless
 # no-op in iTerm2/other terminals or non-interactive shells.
 
+export COLORTERM=truecolor
+
 if [[ "$TERM_PROGRAM" == "Apple_Terminal" && -o interactive ]]; then
   _claude_terminal_profile="Claude-Dev"
   _claude_terminal_profile_file="$HOME/.config/terminal/Claude-Dev.terminal"

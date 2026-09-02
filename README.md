@@ -14,6 +14,7 @@ Stow-based dotfiles, split into two account profiles:
 On the admin account:
 ```bash
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
+./prepare-stow-targets.sh admin ~
 stow -t ~ admin
 ```
 
@@ -21,14 +22,22 @@ On the isolated dev account (see "Bootstrap a new dev account" below first):
 ```bash
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
 git submodule update --init --remote
+./prepare-stow-targets.sh dev ~
 stow -t ~ dev
 ```
 
 To re-stow after changes (symlinks not set correctly):
 ```bash
+./prepare-stow-targets.sh dev ~
 stow -R -t ~ -n -v dev   # dry run, review diffs
 stow -R -t ~ dev         # apply
 ```
+
+`prepare-stow-targets.sh` creates the package's directory structure in the
+target before Stow runs. This prevents Stow from folding an entire directory
+such as `~/.pi` into one repository symlink: managed files remain symlinked,
+while credentials, sessions, caches, and other runtime files are written to
+real directories under `$HOME`.
 
 ## Bootstrap a new dev account (no sudo, ever)
 
