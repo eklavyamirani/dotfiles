@@ -1,1 +1,25 @@
-.config/gh
+# Allowlist model for dev/.config: anything new placed here (e.g. a tool's
+# config directory under ~/.config) is untracked by default, since these
+# directories commonly grow credential/token files over time (API keys,
+# OAuth tokens, session cookies) that would otherwise get silently
+# `git add -A`'d the moment they appear. To track a new config, explicitly
+# un-ignore it below (both the directory and its contents).
+dev/.config/*
+
+# nvim config is managed by sync-external-repos, not tracked in this repo
+# (already excluded by the wildcard above; listed for clarity)
+
+!dev/.config/terminal/
+!dev/.config/terminal/**
+
+!dev/.config/llama-server/
+!dev/.config/llama-server/**
+
+!dev/.config/external-repos.json
+
+# Pi agent runtime state may contain credentials, downloaded binaries,
+# session history, caches, and machine-local UI settings.
+dev/.pi/agent/*
+!dev/.pi/agent/models.json
+!dev/.pi/agent/prompts/
+!dev/.pi/agent/prompts/**
