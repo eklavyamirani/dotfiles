@@ -4,13 +4,14 @@
 
 export EDITOR='vi'
 
-# Increase history size. Allow 32³ entries; the default is 500.
+# Increase zsh history size (in memory and persisted to $HISTFILE).
+# Allow 32³ entries; the default is 500.
 export HISTSIZE='32768';
-export HISTFILESIZE="${HISTSIZE}";
+export SAVEHIST="${HISTSIZE}";
 # Omit duplicates and commands that begin with a space from history.
 export HISTCONTROL='ignoreboth';
 
-# Switch into the isolated dev account (set DEV_USER if it's not "dev").
+# Switch into the isolated dev account (set DEV_USER if it's not "claude").
 #
 # Uses ssh, not su -- su keeps the dev shell as a descendant of THIS
 # Terminal.app process (owned by the admin account), which lets any process
@@ -26,5 +27,5 @@ export HISTCONTROL='ignoreboth';
 # (System Settings > General > Sharing > Remote Login), and a key added to
 # the dev account's ~/.ssh/authorized_keys.
 dev-shell() {
-  ssh -t "${DEV_USER:-dev}@127.0.0.1"
+  ssh -t "${DEV_USER:-claude}@127.0.0.1"
 }

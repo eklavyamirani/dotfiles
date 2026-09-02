@@ -1,9 +1,10 @@
 # set nvim as the default editor
 export EDITOR='nvim'
 
-# Increase Bash history size. Allow 32³ entries; the default is 500.
+# Increase zsh history size (in memory and persisted to $HISTFILE).
+# Allow 32³ entries; the default is 500.
 export HISTSIZE='32768';
-export HISTFILESIZE="${HISTSIZE}";
+export SAVEHIST="${HISTSIZE}";
 # Omit duplicates and commands that begin with a space from history.
 export HISTCONTROL='ignoreboth';
 

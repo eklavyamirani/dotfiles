@@ -1,29 +1,22 @@
 # dotfiles
 
-Stow-based dotfiles, split into two account profiles:
-
-- **`admin/`** — the main/admin macOS account. Intentionally minimal: no
-  Homebrew, no language runtimes, no dev tooling. Just shell basics and a
-  `dev-shell` helper to `ssh` into the isolated dev account.
-- **`dev/`** — an isolated, non-admin account that owns all development
-  tooling (Homebrew installed to `~/.homebrew`, no sudo required; mise;
-  neovim; pi/llama-server configs).
+Stow-based dotfiles for **`dev/`** — an isolated, non-admin macOS account
+that owns all development tooling (Homebrew installed to `~/.homebrew`, no
+sudo required; mise; neovim; pi/llama-server configs). The paired
+main/admin account is deliberately minimal and its profile is kept only as
+a frozen snapshot in `archive/admin/` (see its README) until it moves to
+its own repository.
 
 ## Deploy
 
-On the admin account:
+On the isolated dev account, the normal path is `./bootstrap.sh` (see
+"Bootstrap a new dev account" below). The equivalent manual steps, if you
+already have `stow` and Homebrew:
 ```bash
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
-./prepare-stow-targets.sh admin ~
-stow -t ~ admin
-```
-
-On the isolated dev account (see "Bootstrap a new dev account" below first):
-```bash
-git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
-git submodule update --init --remote
 ./prepare-stow-targets.sh dev ~
 stow -t ~ dev
+~/.local/bin/sync-external-repos   # fetches the Neovim config
 ```
 
 To re-stow after changes (symlinks not set correctly):
@@ -47,7 +40,7 @@ git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
 ```
 
 `bootstrap.sh` is a generic, declarative step-runner: the actual steps
-(Homebrew install, `stow`, `mise`/`stow` install, `sync-external-repos`,
+(Homebrew install, `stow`/`mise` install, `stow`, `sync-external-repos`,
 `brew bundle`) live in `bootstrap-steps.json`, not hardcoded in the script.
 To change what bootstrap does, edit that manifest -- `bootstrap.sh` itself
 shouldn't need touching. Each step entry has:
@@ -56,7 +49,7 @@ shouldn't need touching. Each step entry has:
 {
   "name": "install Homebrew into ~/.homebrew",
   "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
-  "skip_if": "[ -d \"$HOME/.homebrew\" ]",
+  "skip_if": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
   "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local"
 }
 ```
@@ -81,43 +74,10 @@ never requires an admin password. A startup tripwire in
 `dev/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
 compromised (e.g. another account's Homebrew leaks onto `PATH`).
 
-### Setting up `dev-shell` (SSH, not `su`)
+### `dev-shell` from the admin account
 
-`dev-shell` uses `ssh claude@127.0.0.1`, not `su`. `su` keeps the dev shell
-as a descendant of the admin account's own Terminal.app process, and macOS
-resolves Apple Event "responsible process" permissions by walking up that
-ancestry — so a process running as the dev user can send unprompted
-AppleScript to the admin's Terminal.app (e.g. `do script "..."` runs as the
-admin account: a full privilege escalation out of the isolated account).
-`ssh` forks a fresh process tree via `sshd` with no Terminal.app ancestor,
-closing this off entirely. One-time setup, on the **admin** account:
-
-```bash
-# 1. Enable Remote Login, restricted to the dev account only
-sudo systemsetup -setremotelogin on
-sudo dseditgroup -o edit -a claude -t user com.apple.access_ssh
-
-# 2. Generate a key pair for the admin account (on this machine, not copied
-#    in from elsewhere) and authorize it for the dev account
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_dev -N ""
-ssh-copy-id -i ~/.ssh/id_ed25519_dev.pub claude@127.0.0.1
-
-# 3. Require key-based auth only (edit /etc/ssh/sshd_config as root)
-#    Match User claude
-#        PasswordAuthentication no
-sudo tee -a /etc/ssh/sshd_config <<'EOF'
-Match User claude
-    PasswordAuthentication no
-EOF
-sudo launchctl kickstart -k system/com.openssh.sshd
-```
-
-Then `dev-shell` (from `admin/.zprofile`) just works: `ssh -t claude@127.0.0.1`.
-
-Note: use `127.0.0.1`, not `localhost` — macOS's `sshd_config` ships with
-`ListenAddress 127.0.0.1` (IPv4 only), so if `localhost` resolves to `::1`
-first on your machine, the connection will fail even with everything else
-configured correctly.
+The admin-side `dev-shell` helper and its one-time SSH setup live with the
+archived admin profile: see `archive/admin/README.md`.
 
 ### GitHub Copilot CLI login and the Keychain
 
@@ -171,8 +131,9 @@ cloned, existing ones get `git pull --ff-only`. There's no commit pinning
 configure. To track a new repo, just add an entry and rerun.
 
 Each entry is synced independently -- one failing entry doesn't halt the
-rest. A failed clone has its partial directory cleaned up automatically; a
-failed pull (e.g. local edits blocking a fast-forward) is reported and left
+rest. A failed clone has its partial directory cleaned up automatically
+(only if this run created it -- a pre-existing non-git `local_dir` is
+refused, never deleted); a failed pull (e.g. local edits blocking a fast-forward) is reported and left
 completely untouched, never auto-reverted. A summary is printed at the end
 and the exit code is non-zero if anything failed.
 

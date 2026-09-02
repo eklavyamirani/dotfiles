@@ -16,9 +16,10 @@
 # failing entry does NOT halt the rest -- every entry is attempted, failures
 # are logged, and a summary is printed at the end. Exit status is non-zero
 # if anything failed, so this is safe to use in scripts/CI. Nothing is ever
-# auto-reverted: a failed clone's partial directory is cleaned up (nothing
-# of value was there yet), but a failed pull leaves the existing repo
-# exactly as it was -- your local state is never clobbered automatically.
+# auto-reverted: a failed clone's partial directory is cleaned up only if
+# this run created it, a pre-existing non-git local_dir is refused (move it
+# aside yourself), and a failed pull leaves the existing repo exactly as it
+# was -- your local state is never clobbered automatically.
 set -uo pipefail
 
 MANIFEST="${1:-$HOME/.config/external-repos.json}"
@@ -69,6 +70,10 @@ while IFS=$'\x1f' read -r repo local_dir purpose branch git_options; do
       fail "pull failed for $local_dir -- left untouched, check for local changes or a diverged branch"
       failed+=("$local_dir")
     fi
+  elif [ -e "$local_dir" ] && [ -n "$(ls -A "$local_dir" 2>/dev/null)" ]; then
+    # Exists, non-empty, but not a git checkout: never touch it.
+    fail "$local_dir exists and is not a git checkout -- move it aside and rerun"
+    failed+=("$local_dir")
   else
     log "    cloning..."
     mkdir -p "$(dirname "$local_dir")"
@@ -76,6 +81,8 @@ while IFS=$'\x1f' read -r repo local_dir purpose branch git_options; do
     if git clone ${branch:+-b "$branch"} $git_options "$repo" "$local_dir"; then
       succeeded+=("$local_dir")
     else
+      # Only ever reached for a missing or empty local_dir, so removing it
+      # can't destroy user data.
       fail "clone failed for $local_dir -- removing partial directory"
       rm -rf "$local_dir"
       failed+=("$local_dir")

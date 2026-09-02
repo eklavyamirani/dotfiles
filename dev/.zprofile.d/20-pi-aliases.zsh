@@ -15,5 +15,8 @@ localClaude() {
 
   export ANTHROPIC_BASE_URL=http://localhost:8001
   export ANTHROPIC_API_KEY='sk-no-key-required'
-  claude --settings ~/.claude-local/settings.json "$@"
+  # Explicit rather than relying on the `claude` alias above: zsh expands
+  # aliases inside function bodies at parse time, so the flag would be
+  # injected here silently anyway. Local model -- nothing real to protect.
+  command claude --allow-dangerously-skip-permissions --settings ~/.claude-local/settings.json "$@"
 }

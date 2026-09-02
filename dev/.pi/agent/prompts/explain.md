@@ -2,6 +2,9 @@
 description: Explain pasted code as quote-then-explain sections anchored to line numbers
 argument-hint: "<pasted @path snippet>"
 ---
+<!-- Body kept in sync across dev/.claude/skills/explain/SKILL.md,
+     dev/.copilot/skills/explain/SKILL.md and dev/.pi/agent/prompts/explain.md;
+     edit all three. -->
 Explain the code in the input. The input starts with a `@path:START-END` header
 and a fenced block whose lines are prefixed with their real line numbers in the
 file. Those numbers are authoritative: reuse them, never renumber.

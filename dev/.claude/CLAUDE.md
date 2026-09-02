@@ -1,3 +1,5 @@
+<!-- Kept in sync with dev/.copilot/copilot-instructions.md; edit both. -->
+
 # Dotfile symlink safety
 
 Files under `$HOME` may be GNU Stow symlinks into a Git repository. Before

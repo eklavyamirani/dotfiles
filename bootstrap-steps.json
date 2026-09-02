@@ -2,7 +2,7 @@
   {
     "name": "install Homebrew into ~/.homebrew",
     "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
-    "skip_if": "[ -d \"$HOME/.homebrew\" ]",
+    "skip_if": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
     "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local, no sudo required"
   },
   {

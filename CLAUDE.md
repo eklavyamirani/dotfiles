@@ -4,18 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Type
 
-This is a **stow-based dotfiles repository**, split into two account profiles
-for a two-account macOS setup: a minimal admin account and an isolated,
-non-admin dev account that owns all development tooling.
+This is a **stow-based dotfiles repository** for the isolated, non-admin
+dev account of a two-account macOS setup. The minimal admin account's
+profile is archived here (not live) pending a move to its own repository.
 
 ## Package layout
 
-- **`admin/`** — deployed on the main/admin account. No Homebrew, no
-  language runtimes, no dev tooling by design. Just shell basics (`.zshrc`,
-  `.zprofile`) and a `dev-shell` function to `ssh` into the dev account
-  (not `su` — see `admin/.zprofile` for why: `su` shares process ancestry
-  with the admin's Terminal.app, letting the dev account send unprompted
-  Apple Events back to it).
+- **`archive/admin/`** — frozen, reference-only snapshot of the main/admin
+  account profile (`.zshrc`, `.zprofile` with the `dev-shell` ssh helper,
+  `.macos`). Not deployed from here; nothing in `dev/` or the bootstrap
+  depends on it. Don't extend it — it's leaving this repo.
 - **`dev/`** — deployed on the isolated non-admin dev account. Owns:
   - Homebrew, installed to `~/.homebrew` (never `/opt/homebrew` or
     `/usr/local`) — no sudo required to install or use.
@@ -32,12 +30,6 @@ non-admin dev account that owns all development tooling.
 
 ## Setup Instructions
 
-### Deploy admin profile (main account)
-```bash
-./prepare-stow-targets.sh admin ~
-stow -t ~ admin
-```
-
 ### Bootstrap + deploy dev profile (isolated non-admin account)
 ```bash
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
@@ -45,8 +37,8 @@ git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
 ```
 `bootstrap.sh` (repo root -- deliberately not in `dev/.local/bin`, since it
 runs `stow` itself and can't depend on `stow` having already run) is a
-generic step-runner; the actual steps (Homebrew install, `stow`, `mise`
-install, `sync-external-repos`, `brew bundle`) are declared in
+generic step-runner; the actual steps (Homebrew install, `stow`/`mise`
+install, `stow`, `sync-external-repos`, `brew bundle`) are declared in
 `bootstrap-steps.json`, not hardcoded in the script. Each step's `command`
 runs via `eval` in the same process (not a subshell) so env/`PATH` changes
 persist across steps; `skip_if` allows idempotent skip conditions. Halts on
@@ -65,17 +57,21 @@ directories (such as `~/.pi`) into the repository.
 - **`.zprofile.d/05-local-bin-path.zsh`** - `~/.local/bin` on PATH
 - **`.zprofile.d/10-editor-history.zsh`** - EDITOR, history settings, nvim aliases
 - **`.zprofile.d/20-pi-aliases.zsh`** - local LLM / pi agent aliases
-- **`.zprofile.d/40-mise.zsh`** - mise activation
+- **`.zprofile.d/30-system-helpers.zsh`** - `diskcheck` helper
 - **`.zprofile.d/50-homebrew-isolated.zsh`** - isolated Homebrew shellenv,
   a `brew()` function pinning to `~/.homebrew` regardless of PATH ordering,
   and a startup tripwire warning if isolation is ever compromised
+- **`.zprofile.d/55-mise.zsh`** - mise activation (must run after 50, since
+  mise is installed via Homebrew)
+- **`.zprofile.d/60-terminal-appearance.zsh`** - Claude-Dev Terminal.app
+  profile bootstrap
 
 ### Neovim Configuration (`dev/.config/nvim`, external repo via `sync-external-repos`)
 - **`init.lua`** - Main initialization file with basic settings and keymaps
 - **`lua/config/plugins.lua`** - Plugin declarations and setup via vim-plug
 
-### macOS Defaults (`admin/.macos`)
-- Run once on the admin account for system-wide typing/keyboard preferences
+### macOS Defaults (`archive/admin/.macos`)
+- Archived; run once on the admin account for system-wide typing/keyboard preferences
 
 ## Key Customizations
 

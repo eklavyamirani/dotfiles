@@ -22,12 +22,14 @@ if [[ "$TERM_PROGRAM" == "Apple_Terminal" && -o interactive ]]; then
   _claude_terminal_profile_file="$HOME/.config/terminal/Claude-Dev.terminal"
 
   if [[ -f "$_claude_terminal_profile_file" ]] && ! osascript -e "tell application \"Terminal\" to exists settings set \"$_claude_terminal_profile\"" 2>/dev/null | grep -q true; then
-    # Importing always opens a new frontmost window -- close it right away
-    # since it's not the shell that triggered this.
+    # Importing always opens a new window -- close it right away since it's
+    # not the shell that triggered this. Close by reference, not "window 1":
+    # front-to-back ordering isn't guaranteed to have updated yet, and
+    # "window 1" could be this very shell.
     osascript > /dev/null 2>&1 << EOF
 tell application "Terminal"
-  open POSIX file "$_claude_terminal_profile_file"
-  close window 1
+  set newWin to (open POSIX file "$_claude_terminal_profile_file")
+  close newWin
   set default settings to settings set "$_claude_terminal_profile"
 end tell
 EOF
