@@ -37,3 +37,25 @@ jobs:
             --volume "$PWD:/repo:ro" \
             --env SOURCE_REPO=/repo \
             dotfiles-ci /repo/tests/run-tests.sh '${{ matrix.scenario }}'
+
+  # Single stable check to mark as required in the branch protection rule /
+  # ruleset for main. Requiring the matrix jobs directly would mean pinning
+  # "apply (01-fresh-apply)" and "apply (02-reapply)" by name, and a required
+  # check that no longer exists blocks every PR -- so renaming a scenario or
+  # adding a third one would silently wedge the repo. This job's name never
+  # changes, and it fails unless every scenario in the matrix passed.
+  #
+  # Keep this workflow free of `paths:` filters: a required check that never
+  # reports leaves PRs permanently un-mergeable.
+  apply-tests:
+    name: apply tests
+    if: always()
+    needs: apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every scenario to have passed
+        env:
+          RESULT: ${{ needs.apply.result }}
+        run: |
+          printf 'apply matrix result: %s\n' "$RESULT"
+          [ "$RESULT" = success ] || exit 1

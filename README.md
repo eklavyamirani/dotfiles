@@ -199,5 +199,9 @@ docker run --rm --network none -v "$PWD:/repo:ro" -e SOURCE_REPO=/repo \
   dotfiles-ci /repo/tests/run-tests.sh
 ```
 
-Both run on every push and pull request (`.github/workflows/ci.yml`). See
+Both run on every push and pull request (`.github/workflows/ci.yml`). The
+workflow also has an `apply tests` job that passes only if every scenario in
+the matrix passed -- mark that one as the required status check on `main`
+rather than the individual `apply (...)` jobs, so adding or renaming a
+scenario can't leave a required check that never reports. See
 `tests/README.md` for what is real, what is stubbed, and why.
