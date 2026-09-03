@@ -17,6 +17,11 @@ dev/.config/*
 
 !dev/.config/external-repos.json
 
+# Pinned language runtimes (versions only -- mise keeps installs and any
+# credentials elsewhere, under ~/.local/share/mise)
+!dev/.config/mise/
+!dev/.config/mise/config.toml
+
 # Pi agent runtime state may contain credentials, downloaded binaries,
 # session history, caches, and machine-local UI settings.
 dev/.pi/agent/*

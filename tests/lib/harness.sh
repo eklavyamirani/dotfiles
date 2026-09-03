@@ -89,7 +89,14 @@ finish() {
 # ---------------------------------------------------------------------------
 
 sandbox_create() {
-  SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-ci.XXXXXXXX")"
+  # ${TMPDIR%/}: on macOS TMPDIR ends with a slash, which would put a doubled
+  # slash inside $HOME ("/tmp//sandbox/home"). Anything that compares $HOME
+  # against a normalised path (`cd ... && pwd`) then mismatches -- which is
+  # exactly how the Homebrew stub once concluded its own prefix was outside
+  # HOME, silently fell back to PATH, and let the real brew run.
+  local tmp_root="${TMPDIR:-/tmp}"
+  tmp_root="${tmp_root%/}"
+  SANDBOX="$(mktemp -d "$tmp_root/dotfiles-ci.XXXXXXXX")"
   export SANDBOX
   export HOME="$SANDBOX/home"
   export ORIGINS="$SANDBOX/origins"
@@ -98,6 +105,20 @@ sandbox_create() {
   REPO="$HOME/dotfiles"
   mkdir -p "$HOME" "$ORIGINS"
   : >"$BREW_CALL_LOG"
+
+  # Safety net. bootstrap.sh calls plain `brew` after loading the stub's
+  # shellenv; if that eval ever fails, PATH still holds the developer's (or the
+  # runner's) real Homebrew and the run would quietly install and upgrade real
+  # packages on the real machine. This guard sits ahead of them on PATH, so the
+  # stub is used or the scenario fails loudly -- never the real thing.
+  mkdir -p "$SANDBOX/guardbin"
+  cat >"$SANDBOX/guardbin/brew" <<'GUARD'
+#!/bin/sh
+printf 'test guard: the real brew was invoked (%s).\n' "$*" >&2
+printf 'The sandbox stub should have been on PATH first -- refusing.\n' >&2
+exit 127
+GUARD
+  chmod +x "$SANDBOX/guardbin/brew"
 
   git config --global user.name  'Dotfiles CI'
   git config --global user.email 'ci@example.invalid'
@@ -166,10 +187,36 @@ origin_head() { git -C "$ORIGINS/$1" rev-parse HEAD; }
 # Runs the real bootstrap.sh with a clean environment, capturing its transcript.
 # Returns bootstrap's exit status; the combined output is left in $BOOTSTRAP_OUT.
 run_bootstrap() {
-  BOOTSTRAP_OUT="$SANDBOX/bootstrap-$(date +%s%N).out"
+  _RUN_SEQ=$((${_RUN_SEQ:-0} + 1))
+  BOOTSTRAP_OUT="$SANDBOX/bootstrap-$_RUN_SEQ.out"
   local status=0
-  ( cd "$REPO" && ./bootstrap.sh ) >"$BOOTSTRAP_OUT" 2>&1 || status=$?
+  ( cd "$REPO" && env -u HOMEBREW_PREFIX -u HOMEBREW_CELLAR -u HOMEBREW_REPOSITORY \
+      PATH="$SANDBOX/guardbin:$PATH" ./bootstrap.sh ) \
+    >"$BOOTSTRAP_OUT" 2>&1 || status=$?
   printf '   (bootstrap exit %s, output: %s)\n' "$status" "$BOOTSTRAP_OUT"
+  return "$status"
+}
+
+# Runs the real reapply.sh -- the steady-state path a user takes after
+# `git pull`, as opposed to bootstrap.sh's fresh-machine path. --yes is always
+# passed because reapply refuses to act unattended without it (there is no tty
+# here); everything else is up to the caller. Output lands in $REAPPLY_OUT.
+run_reapply() { # extra reapply.sh arguments
+  _RUN_SEQ=$((${_RUN_SEQ:-0} + 1))
+  REAPPLY_OUT="$SANDBOX/reapply-$_RUN_SEQ.out"
+  local status=0
+  # Unlike bootstrap.sh, reapply.sh does not install Homebrew and then load its
+  # shellenv -- it expects to be run from a shell the deployed .zprofile has
+  # already set up. Putting the isolated prefix on PATH here reproduces that,
+  # and is what makes brew/stow/mise resolvable the way they are in real use.
+  # HOMEBREW_* is scrubbed for the same reason PATH is rewritten: running the
+  # suite natively on a Mac leaves the developer's own prefix in the
+  # environment, and link-docker-cli-plugins would then wire the sandbox's
+  # plugin directory to the real Homebrew instead of the stub.
+  ( cd "$REPO" && env -u HOMEBREW_PREFIX -u HOMEBREW_CELLAR -u HOMEBREW_REPOSITORY \
+      PATH="$HOME/.homebrew/bin:$SANDBOX/guardbin:$PATH" \
+      ./reapply.sh --yes "$@" ) >"$REAPPLY_OUT" 2>&1 || status=$?
+  printf '   (reapply exit %s, output: %s)\n' "$status" "$REAPPLY_OUT"
   return "$status"
 }
 
@@ -214,9 +261,18 @@ package_dirs() { # package dir -- directories that must exist for real in HOME
 
 # Snapshot helpers used to prove reruns don't churn the deployed tree or write
 # back into the repository.
+# GNU and BSD stat disagree on flags; the suite runs on both (Linux container
+# and the macOS CI runner), so ask each in turn.
+inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1"; }
+
 home_link_snapshot() {
+  # `find -printf` is GNU-only; readlink per link keeps this working on the
+  # macOS runner too.
   find "$HOME" -path "$HOME/dotfiles" -prune -o -path "$HOME/.homebrew" -prune -o \
-       -path "$HOME/.config/nvim" -prune -o -type l -printf '%P -> %l\n' 2>/dev/null | sort
+       -path "$HOME/.config/nvim" -prune -o -type l -print 2>/dev/null |
+    while IFS= read -r link; do
+      printf '%s -> %s\n' "${link#"$HOME"/}" "$(readlink "$link")"
+    done | sort
 }
 
 repo_tree_snapshot() {

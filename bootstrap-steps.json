@@ -36,9 +36,21 @@
     "purpose": ""
   },
   {
+    "name": "install pinned runtimes (mise)",
+    "command": "mise install",
+    "skip_if": "[ ! -f \"$HOME/.config/mise/config.toml\" ]",
+    "purpose": "Language runtimes are pinned in dev/.config/mise/config.toml, not installed via Homebrew"
+  },
+  {
     "name": "install Brewfile packages",
     "command": "brew bundle --file=\"$REPO_DIR/dev/Brewfile\"",
     "skip_if": "",
     "purpose": ""
+  },
+  {
+    "name": "wire docker CLI plugins",
+    "command": "\"$HOME/.local/bin/link-docker-cli-plugins\"",
+    "skip_if": "",
+    "purpose": "docker resolves buildx/compose from ~/.docker/cli-plugins, not PATH -- installing the formulae is not enough"
   }
 ]
