@@ -13,10 +13,10 @@ same properties are approximated with plain manifests:
 | Domain | Declared in | Reconciled by |
 | --- | --- | --- |
 | Shell/config files | `dev/` (stow package) | `reapply.sh` (links + prunes stale ones) |
-| Homebrew packages | `dev/Brewfile` | `reapply.sh` (installs; reports drift; `--prune` removes) |
+| CLI tools + runtimes | `dev/.config/mise/config.toml` | `reapply.sh` / `bootstrap.sh` (`mise install`) |
+| What mise can't pin | `dev/Brewfile` | `reapply.sh` (installs; reports drift; `--prune` removes) |
 | External repos | `dev/.config/external-repos.json` | `sync-external-repos` |
 | Fresh-machine setup | `bootstrap-steps.json` | `bootstrap.sh` |
-| Runtime versions | `dev/.config/mise/config.toml` | `reapply.sh` (`mise install`) |
 | Docker CLI plugins | `dev/.local/bin/link-docker-cli-plugins` | `reapply.sh` (runs it after `brew bundle`) |
 
 Rules that keep it from drifting again:
@@ -32,22 +32,33 @@ Rules that keep it from drifting again:
   compares against `brew leaves --installed-on-request` so it never nags
   about it.
 
-Runtimes belong to mise, never to Homebrew. A brew formula tracks one
-moving version and silently upgrades on any `brew bundle`; mise pins an
-exact version that a project-local `.mise.toml` can override. Add a runtime
-with `mise use -g <tool>@<exact version>` and commit the resulting
+Anything mise has a backend for belongs to mise, never to Homebrew --
+runtimes and CLI tools alike. A brew formula tracks one moving version,
+silently upgrades on any `brew bundle`, cannot be rolled back, and in this
+account's non-default prefix is usually built from source; mise pins an
+exact version, keeps installs side by side (rollback = edit the version
+string and rerun), and ships prebuilt binaries. Add a tool with
+`mise use -g <tool>@<exact version>` and commit the resulting
 `dev/.config/mise/config.toml` change -- do not add it to the Brewfile.
-`mise` itself is the one exception: it is installed by Homebrew, since
-something has to bootstrap the bootstrapper.
+Check `mise registry` before reaching for `brew install`.
+
+What legitimately stays in the Brewfile, and only this: `stow` and `mise`
+(bootstrap dependencies -- something has to bootstrap the bootstrapper),
+formulae with no mise backend (`git`, `tree`, `hf`, `audio-cpp`), the docker
+CLI plugins, and casks. mise's own version is consequently unpinned; that
+gap is accepted and documented in the README rather than papered over.
 
 Only *globally* useful runtimes belong in `dev/.config/mise/config.toml`.
 A runtime that one project needs belongs in that project's own
 `.mise.toml` (`mise use dotnet@10.0.400` inside the repo), so the version
 travels with the code rather than becoming an account-wide fact.
 
-Docker CLI plugins are not runtimes and mise does not fit them: `docker
+Docker CLI plugins are not PATH tools and mise does not fit them: `docker
 buildx` resolves from `~/.docker/cli-plugins`, not from `$PATH`, so a mise
-shim would leave `docker buildx` broken. They stay Homebrew formulae, and
+shim would leave `docker buildx` broken. They stay Homebrew formulae -- `docker-compose` too, even
+though mise has a backend for it, since `link-docker-cli-plugins` reads one
+source directory and splitting them would leave `docker compose` broken --
+and
 `dev/.local/bin/link-docker-cli-plugins` wires them into the plugin
 directory -- without it, a fresh machine installs the formulae and still
 reports `docker: unknown command: docker buildx`. Pointing docker's
@@ -73,7 +84,10 @@ profile is archived here (not live) pending a move to its own repository.
   - `.zprofile.d/*.zsh` — numbered snippets sourced in order by `.zprofile`
     (a thin loader). Add new snippets here rather than editing `.zprofile`
     directly.
-  - `Brewfile` — the curated package list for `brew bundle`.
+  - `Brewfile` — only what mise cannot pin: `stow`/`mise` themselves,
+    formulae with no mise backend, the docker CLI plugins, and casks.
+  - `.config/mise/config.toml` — every other CLI tool and runtime, pinned
+    to an exact version.
   - `external-repos.json` + `sync-external-repos` — declarative manifest
     and idempotent sync script for repos that live outside `dotfiles`
     (currently just the Neovim config), so they stay deployable standalone
@@ -166,9 +180,10 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
   a `brew()` function pinning to `~/.homebrew` regardless of PATH ordering,
   and a startup tripwire warning if isolation is ever compromised
 - **`.zprofile.d/55-mise.zsh`** - mise activation (must run after 50, since
-  mise is installed via Homebrew)
-- **`.config/mise/config.toml`** - globally pinned language runtimes
-  (exact versions; see the declarative principle above)
+  mise is installed via Homebrew and its tools must outrank brew's on PATH),
+  shims appended as a fallback, plus a tripwire for a shadowed pinned tool
+- **`.config/mise/config.toml`** - globally pinned CLI tools and language
+  runtimes (exact versions; see the declarative principle above)
 - **`.zprofile.d/60-terminal-appearance.zsh`** - Claude-Dev Terminal.app
   profile bootstrap
 

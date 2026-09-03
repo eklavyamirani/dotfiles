@@ -1,9 +1,26 @@
 # Brewfile for the isolated dev account's Homebrew (~/.homebrew).
 #
-# This file is the SOURCE OF TRUTH for what is installed, not a wishlist:
-# `./reapply.sh` reports anything installed here that isn't listed below.
-# If you `brew install` something and want to keep it, add it here --
-# otherwise the next reapply will tell you it drifted.
+# This file is the SOURCE OF TRUTH for what Homebrew installs, not a
+# wishlist: `./reapply.sh` reports anything installed here that isn't
+# listed below. If you `brew install` something and want to keep it, add
+# it here -- otherwise the next reapply will tell you it drifted.
+#
+# ---------------------------------------------------------------------
+# THE SPLIT: pinned CLI tools live in dev/.config/mise/config.toml.
+#
+# Homebrew cannot pin a version and cannot roll one back, and in this
+# account's non-default prefix it builds most formulae from source. So
+# anything mise has a backend for is pinned there, and only these four
+# categories stay here:
+#
+#   1. bootstrap dependencies  -- stow, mise (something has to run first)
+#   2. tools with NO mise backend (checked against mise's registry)
+#   3. docker CLI *plugins*    -- see the note in the containers section
+#   4. casks                   -- mise does not manage .app bundles
+#
+# Do not re-add a CLI formula here by reflex: check `mise registry` first,
+# and if it resolves, pin it in dev/.config/mise/config.toml instead.
+# ---------------------------------------------------------------------
 #
 # NOTE: bash is deliberately NOT declared. The scripts here are bash but
 # must run under macOS's stock 3.2 -- bootstrap.sh executes on a fresh
@@ -17,39 +34,35 @@
 # ---- Taps ----
 tap "0xshug0/audio-cpp", "https://github.com/0xShug0/homebrew-audio-cpp", trusted: true
 
-# ---- CLI essentials ----
-brew "git"          # likely newer than the system git
-brew "gh"           # GitHub CLI
-brew "fzf"          # fuzzy finder
-brew "ripgrep"      # fast recursive grep
-brew "stow"         # dotfiles symlink management
-brew "mise"         # per-project language/tool version manager
-brew "tree"         # directory tree listing
+# ---- Bootstrap dependencies ----
+# stow links this package into $HOME (so it must exist before the mise
+# config does), and mise installs everything in config.toml. mise itself is
+# therefore the one tool whose version nothing pins -- documented in README.
+brew "stow"
+brew "mise"
 
-# ---- Terminal multiplexer ----
-brew "tmux"
+# ---- No mise backend (still unpinned; that gap is deliberate and visible) ----
+brew "git"                         # not in mise's registry (only git-* helpers)
+brew "tree"                        # not in mise's registry
+brew "hf"                          # HuggingFace hub client (pulls in python@3.14)
+brew "0xshug0/audio-cpp/audio-cpp" # C++ audio inference engine powered by ggml
 
-# ---- Editor ----
-brew "neovim"
-brew "tree-sitter"      # neovim dependency, kept explicit
-brew "tree-sitter-cli"  # :TSInstall grammar compilation
-
-# ---- Language runtimes ----
-# Intentionally none. Runtimes are pinned in dev/.config/mise/config.toml
-# and installed by mise, which pins an exact version instead of tracking
-# whatever a brew formula happens to point at this week. `mise` itself is
-# declared above, since something has to bootstrap the bootstrapper.
-# (python@3.14 will still appear installed -- it is a dependency of hf.)
-
-# ---- Containers (optional; comment out if unneeded) ----
-brew "colima"
-brew "docker"
+# ---- Containers ----
+# The docker *client* is pinned in mise. These two are not tools on PATH but
+# docker CLI plugins: `docker buildx` / `docker compose` resolve from
+# ~/.docker/cli-plugins, which dev/.local/bin/link-docker-cli-plugins fills
+# from this Homebrew prefix. docker-compose does have a mise backend, but
+# moving it would leave `docker compose` broken unless that script learned a
+# second source directory -- not worth the coupling for one formula.
+# docker-buildx has no mise backend at all.
 brew "docker-buildx"
 brew "docker-compose"
 
-# ---- Model tooling (optional; used by local LLM / pi agent setup) ----
-brew "hf"                          # HuggingFace hub client (pulls in python@3.14)
-brew "0xshug0/audio-cpp/audio-cpp" # C++ audio inference engine powered by ggml
+# ---- CLI tools and runtimes ----
+# Intentionally none. gh, fzf, ripgrep, tmux, neovim, tree-sitter, colima,
+# docker and python are pinned to exact versions in
+# dev/.config/mise/config.toml and installed by mise.
+# (python@3.14 will still appear installed -- it is a dependency of hf.)
 
 # ---- Casks (GUI apps / fonts) ----
 cask "font-fira-code-nerd-font"

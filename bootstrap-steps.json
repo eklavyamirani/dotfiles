@@ -36,16 +36,16 @@
     "purpose": ""
   },
   {
-    "name": "install pinned runtimes (mise)",
+    "name": "install pinned tools (mise)",
     "command": "mise install",
     "skip_if": "[ ! -f \"$HOME/.config/mise/config.toml\" ]",
-    "purpose": "Language runtimes are pinned in dev/.config/mise/config.toml, not installed via Homebrew"
+    "purpose": "CLI tools and language runtimes are pinned to exact versions in dev/.config/mise/config.toml; Homebrew cannot pin or roll back. Must run after the stow step, which links that file into $HOME where mise reads it"
   },
   {
     "name": "install Brewfile packages",
     "command": "brew bundle --file=\"$REPO_DIR/dev/Brewfile\"",
     "skip_if": "",
-    "purpose": ""
+    "purpose": "Only what mise cannot pin: bootstrap deps, formulae with no mise backend, the docker CLI plugins, and casks. Runs after mise so a failure here cannot leave the pinned toolchain uninstalled"
   },
   {
     "name": "wire docker CLI plugins",

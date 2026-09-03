@@ -1,8 +1,9 @@
 # dotfiles
 
 Stow-based dotfiles for **`dev/`** — an isolated, non-admin macOS account
-that owns all development tooling (Homebrew installed to `~/.homebrew`, no
-sudo required; mise; neovim; pi/llama-server configs). The paired
+that owns all development tooling (CLI tools and
+runtimes pinned with mise; an isolated Homebrew in `~/.homebrew`, no sudo
+required; neovim; pi/llama-server configs). The paired
 main/admin account is deliberately minimal and its profile is kept only as
 a frozen snapshot in `archive/admin/` (see its README) until it moves to
 its own repository.
@@ -74,6 +75,83 @@ never requires an admin password. A startup tripwire in
 `dev/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
 compromised (e.g. another account's Homebrew leaks onto `PATH`).
 
+### What pins what: mise for tools, Homebrew for the rest
+
+Tooling is split between two manifests, and the split is not stylistic:
+
+| Manifest | Owns | Pinned? | Rollback? |
+| --- | --- | --- | --- |
+| `dev/.config/mise/config.toml` | CLI tools + language runtimes | yes, exact versions | yes |
+| `dev/Brewfile` | bootstrap deps, formulae with no mise backend, docker CLI plugins, casks | no | no |
+
+Homebrew was the default here and cannot be made reproducible. Upstream is
+explicit that `brew bundle` "does not and will not have a concept of a
+`Brewfile` lock file"
+([Brew-Bundle-and-Brewfile.md](https://docs.brew.sh/Brew-Bundle-and-Brewfile)),
+there is no `brew rollback`, and the alternatives in
+[Versions.md](https://docs.brew.sh/Versions) each disclaim themselves:
+`brew pin` blocks dependent upgrades and stops security updates,
+`HOMEBREW_NO_AUTO_UPDATE` does not stop `brew upgrade`, and `brew extract`
+makes you the maintainer of a formula in your own tap. On top of that, this
+account installs Homebrew to `~/.homebrew`, and the default prefix "is
+required for most bottles (binary packages) to be used"
+([Installation.md](https://docs.brew.sh/Installation)) — so most formulae
+here were compiled from source on every fresh machine.
+
+mise has none of those problems: exact versions in a tracked file, prebuilt
+binaries from its aqua/ubi backends, side-by-side installs, no sudo. So
+everything mise has a backend for moved (see
+[#4](https://github.com/eklavyamirani/dotfiles/issues/4)):
+`gh`, `fzf`, `ripgrep`, `tmux`, `neovim`, `tree-sitter`, `colima`, `docker`
+and `python`.
+
+#### Rolling back a tool
+
+Side-by-side installs make this an edit, not a repair:
+
+```bash
+$EDITOR dev/.config/mise/config.toml   # neovim = "0.12.5" -> "0.12.4"
+mise install                           # or ./reapply.sh
+git commit -am 'pin neovim 0.12.4'
+```
+
+The version you rolled off stays on disk under
+`~/.local/share/mise/installs/<tool>/<version>`, so rolling forward again is
+instant and offline. Nothing is deduplicated, though — each version is a
+full copy. `mise prune` reclaims versions no config references if disk gets
+tight.
+
+To bump a pin, `mise use -g <tool>@<version>` and commit the resulting diff.
+Never write `latest` or a `~>` range in that file: an inexact pin is the
+behaviour this split exists to eliminate.
+
+#### What is still unpinned
+
+Being honest about the remaining surface, since a table that quietly
+overclaims is worse than no table:
+
+- **`mise` itself.** It is installed by `brew install mise`, which gives
+  whatever is current — the bootstrapper cannot bootstrap itself. Accepted
+  rather than solved: mise's version does not determine the tool versions
+  it installs, so a drifting mise still converges the account to the pins
+  in `config.toml`.
+- **`git`, `tree`, `hf`, `audio-cpp`** — no mise backend exists (checked
+  against mise's registry), so they stay unpinned Homebrew formulae.
+- **`docker-buildx`, `docker-compose`** — docker CLI *plugins*, resolved
+  from `~/.docker/cli-plugins` rather than `PATH`, wired there from the
+  Homebrew prefix by `dev/.local/bin/link-docker-cli-plugins`. `buildx` has
+  no mise backend; `docker-compose` does, but moving it alone would break
+  `docker compose` unless that script learned a second source directory.
+- **Casks.** `brew bundle` is the only thing here that manages `.app`
+  bundles at all.
+- **External repos.** `sync-external-repos` tracks branch tips with no
+  commit pinning (see below) — a separate, still-open gap.
+
+`dev/.zprofile.d/55-mise.zsh` activates mise after Homebrew (so pinned tools
+win over a same-named formula), appends mise's shims directory as a fallback
+for processes that never source `.zprofile`, and carries its own tripwire
+warning if a pinned tool resolves outside `$HOME`.
+
 ### `dev-shell` from the admin account
 
 The admin-side `dev-shell` helper and its one-time SSH setup live with the
@@ -141,7 +219,7 @@ and the exit code is non-zero if anything failed.
 
 `.gitignore` ignores all of `dev/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
-`terminal/`, `llama-server/`, `external-repos.json`). This is deliberate:
+`terminal/`, `llama-server/`, `mise/config.toml`, `external-repos.json`). This is deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one
