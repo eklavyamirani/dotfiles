@@ -2,6 +2,59 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Design principle: declarative, code-first
+
+Every change to this account's system state should be a commit here, and
+`./reapply.sh` should be the only thing that applies it. Real Nix is not an
+option on this machine -- the dev account is deliberately non-admin, and a
+macOS Nix install needs root to create the `/nix` APFS volume -- so the
+same properties are approximated with plain manifests:
+
+| Domain | Declared in | Reconciled by |
+| --- | --- | --- |
+| Shell/config files | `dev/` (stow package) | `reapply.sh` (links + prunes stale ones) |
+| Homebrew packages | `dev/Brewfile` | `reapply.sh` (installs; reports drift; `--prune` removes) |
+| External repos | `dev/.config/external-repos.json` | `sync-external-repos` |
+| Fresh-machine setup | `bootstrap-steps.json` | `bootstrap.sh` |
+| Runtime versions | `dev/.config/mise/config.toml` | `reapply.sh` (`mise install`) |
+| Docker CLI plugins | `dev/.local/bin/link-docker-cli-plugins` | `reapply.sh` (runs it after `brew bundle`) |
+
+Rules that keep it from drifting again:
+- Installing something with `brew install` is a *draft*. It is not real
+  until it is in `dev/Brewfile`; `reapply.sh` reports anything installed
+  that isn't declared, so undeclared packages surface on the next run
+  rather than silently becoming part of the machine.
+- The Brewfile describes the whole closure, including packages you might
+  not want anymore. Remove things by deleting the line and running
+  `./reapply.sh --prune`, not by running `brew uninstall` by hand.
+- Transitive dependencies are deliberately NOT declared. `hf` pulls in
+  `python@3.14`; that belongs to `hf`, not to you, and drift detection
+  compares against `brew leaves --installed-on-request` so it never nags
+  about it.
+
+Runtimes belong to mise, never to Homebrew. A brew formula tracks one
+moving version and silently upgrades on any `brew bundle`; mise pins an
+exact version that a project-local `.mise.toml` can override. Add a runtime
+with `mise use -g <tool>@<exact version>` and commit the resulting
+`dev/.config/mise/config.toml` change -- do not add it to the Brewfile.
+`mise` itself is the one exception: it is installed by Homebrew, since
+something has to bootstrap the bootstrapper.
+
+Only *globally* useful runtimes belong in `dev/.config/mise/config.toml`.
+A runtime that one project needs belongs in that project's own
+`.mise.toml` (`mise use dotnet@10.0.400` inside the repo), so the version
+travels with the code rather than becoming an account-wide fact.
+
+Docker CLI plugins are not runtimes and mise does not fit them: `docker
+buildx` resolves from `~/.docker/cli-plugins`, not from `$PATH`, so a mise
+shim would leave `docker buildx` broken. They stay Homebrew formulae, and
+`dev/.local/bin/link-docker-cli-plugins` wires them into the plugin
+directory -- without it, a fresh machine installs the formulae and still
+reports `docker: unknown command: docker buildx`. Pointing docker's
+`cliPluginsExtraDirs` at brew's bin would also work but is deliberately
+avoided: that setting lives in `~/.docker/config.json`, which holds
+registry `auths` and so can never be tracked here.
+
 ## Repository Type
 
 This is a **stow-based dotfiles repository** for the isolated, non-admin
@@ -49,6 +102,38 @@ Before Stow runs, `prepare-stow-targets.sh` creates real target directories
 so Stow links managed files individually instead of folding whole stateful
 directories (such as `~/.pi`) into the repository.
 
+### Re-apply after pulling changes
+```bash
+cd ~/dotfiles && git pull && ./reapply.sh
+```
+`reapply.sh` (also at the repo root, and for the same reason as
+`bootstrap.sh` -- it runs `stow`, so it can't live in `dev/.local/bin`) is
+the steady-state counterpart to bootstrap: it re-links the `dev` package,
+syncs external repos and runs `brew bundle`, but does not install
+Homebrew/stow/mise. Prefer it over a bare `stow -R`, which unstows using
+the package's *current* contents and therefore strands a dangling symlink
+in `$HOME` whenever a file is renamed or deleted upstream -- and since
+`.zprofile` globs `.zprofile.d/*.zsh`, one stale link breaks every new
+shell.
+
+Failsafes, so a re-apply can never cost you something unrecoverable:
+- It removes only symlinks that point into this repository and whose
+  target is gone. Real files, real directories, and links pointing
+  anywhere else are left untouched.
+- Real files that block a link are moved into
+  `~/.local/state/dotfiles/backup-<timestamp>/` under the same relative
+  path, never overwritten or deleted.
+- Package removal is opt-in. Drift is always *reported*; only `--prune`
+  acts on it, and prune refuses to run if the Brewfile parses as empty --
+  otherwise a typo'd or unreadable manifest would make every installed
+  package look undeclared and wipe the account.
+- It prints the full plan and waits for confirmation. `--dry-run` stops
+  after the plan; `--yes` runs unattended (required when stdin isn't a
+  terminal); `--no-brew` / `--no-sync` skip those steps; `--no-upgrade`
+  installs missing packages without upgrading existing ones (`brew bundle`
+  upgrades by default). Transcript goes to
+  `~/.local/state/dotfiles/reapply-<timestamp>.log`.
+
 ## Configuration Structure
 
 ### Shell Configuration (`dev/`)
@@ -63,8 +148,15 @@ directories (such as `~/.pi`) into the repository.
   and a startup tripwire warning if isolation is ever compromised
 - **`.zprofile.d/55-mise.zsh`** - mise activation (must run after 50, since
   mise is installed via Homebrew)
+- **`.config/mise/config.toml`** - globally pinned language runtimes
+  (exact versions; see the declarative principle above)
 - **`.zprofile.d/60-terminal-appearance.zsh`** - Claude-Dev Terminal.app
   profile bootstrap
+
+### Scripts (`dev/.local/bin`)
+- **`sync-external-repos`** - clones/updates repos from `external-repos.json`
+- **`link-docker-cli-plugins`** - links brew's docker plugins into
+  `~/.docker/cli-plugins` (idempotent; never overwrites a real file there)
 
 ### Neovim Configuration (`dev/.config/nvim`, external repo via `sync-external-repos`)
 - **`init.lua`** - Main initialization file with basic settings and keymaps

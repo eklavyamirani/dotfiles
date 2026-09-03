@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Wire Homebrew-installed docker CLI plugins into ~/.docker/cli-plugins.
+#
+# `docker buildx ...` does NOT resolve plugins from PATH -- the docker CLI
+# looks in ~/.docker/cli-plugins (and the dirs listed in config.json's
+# cliPluginsExtraDirs). So installing the docker-buildx / docker-compose
+# formulae is not enough on its own; without these links a fresh machine
+# has the binaries and still reports "docker: 'buildx' is not a docker
+# command".
+#
+# The obvious alternative -- adding brew's bin to cliPluginsExtraDirs --
+# is deliberately not used: that lives in ~/.docker/config.json, which
+# also holds registry `auths`, so it can never be tracked in this repo.
+# Links in a dedicated directory keep the credential file untouched.
+#
+# Idempotent: safe to run on every bootstrap and reapply. It only ever
+# creates or repoints symlinks it can see are plugin links into the
+# isolated Homebrew prefix; a real file sitting in that directory is
+# reported and left alone rather than overwritten.
+set -euo pipefail
+
+BREW_PREFIX="${HOMEBREW_PREFIX:-$HOME/.homebrew}"
+PLUGIN_DIR="$HOME/.docker/cli-plugins"
+
+if [ ! -d "$BREW_PREFIX/bin" ]; then
+  printf 'link-docker-cli-plugins: no Homebrew prefix at %s, nothing to do\n' "$BREW_PREFIX"
+  exit 0
+fi
+
+mkdir -p "$PLUGIN_DIR"
+
+linked=0
+for binary in "$BREW_PREFIX"/bin/docker-*; do
+  [ -x "$binary" ] || continue
+  name="$(basename "$binary")"
+  # `docker-credential-*` helpers are resolved from PATH, not from the
+  # plugin directory -- linking them here would be wrong.
+  case "$name" in docker-credential-*) continue ;; esac
+
+  target="$PLUGIN_DIR/$name"
+  if [ -L "$target" ]; then
+    current="$(readlink "$target")"
+    [ "$current" = "$binary" ] && continue
+    ln -sfn "$binary" "$target"
+    printf 'link-docker-cli-plugins: repointed %s -> %s\n' "$name" "$binary"
+  elif [ -e "$target" ]; then
+    printf 'link-docker-cli-plugins: WARNING %s exists and is not a symlink, leaving it alone\n' "$target" >&2
+    continue
+  else
+    ln -s "$binary" "$target"
+    printf 'link-docker-cli-plugins: linked %s -> %s\n' "$name" "$binary"
+  fi
+  linked=$((linked + 1))
+done
+
+printf 'link-docker-cli-plugins: %d plugin link(s) created or repointed\n' "$linked"

@@ -58,7 +58,10 @@ if [ ! -f "$MANIFEST" ]; then
   exit 1
 fi
 
-# python3 ships with macOS's Command Line Tools -- no brew/pip install needed.
+# Parsed with whatever python3 is first on PATH; only the `json` stdlib
+# module is used, so any 3.x works. On a fresh machine that is the 3.9 from
+# macOS's Command Line Tools (no brew/pip install needed); on a provisioned
+# one it will be the mise-pinned interpreter. Both are fine.
 if ! parsed=$(python3 -c '
 import json, sys
 
