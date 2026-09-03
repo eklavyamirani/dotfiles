@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: apply (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          # 1. full apply of the configuration from scratch, in a container
+          - 01-fresh-apply
+          # 2. re-apply of new changes onto an existing configuration
+          - 02-reapply
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the test container
+        run: docker build -f tests/Dockerfile -t dotfiles-ci tests/
+
+      # --network none: the scenarios stand up local git remotes for Homebrew
+      # and the external repos, so a run that reaches for the network is a bug,
+      # not a flake. The checkout is mounted read-only -- each scenario copies
+      # it into its own throwaway $HOME.
+      - name: Run scenario
+        run: |
+          docker run --rm --network none \
+            --volume "$PWD:/repo:ro" \
+            --env SOURCE_REPO=/repo \
+            dotfiles-ci /repo/tests/run-tests.sh '${{ matrix.scenario }}'
