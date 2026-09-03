@@ -134,6 +134,25 @@ Failsafes, so a re-apply can never cost you something unrecoverable:
   upgrades by default). Transcript goes to
   `~/.local/state/dotfiles/reapply-<timestamp>.log`.
 
+## Tests
+
+`tests/` holds two scenarios (`tests/scenarios/01-fresh-apply.sh`,
+`02-reapply.sh`) that run the real `bootstrap.sh` (fresh apply) and
+`reapply.sh` (steady state) against the real manifests
+in a throwaway `$HOME`, with local git repos standing in for the Homebrew and
+external-repo remotes — the suite is fully offline (`--network none` in CI).
+Homebrew itself is stubbed (`tests/stubs/homebrew`); everything else (stow,
+`prepare-stow-targets.sh`, `sync-external-repos`, the `.zprofile` chain under
+real zsh) is exercised for real. Run them with
+`docker build -f tests/Dockerfile -t dotfiles-ci tests/` then
+`docker run --rm --network none -v "$PWD:/repo:ro" -e SOURCE_REPO=/repo dotfiles-ci /repo/tests/run-tests.sh`.
+The file-level assertions are derived by walking `dev/`, so new managed files
+and directories are covered without touching the tests. CI
+(`.github/workflows/ci.yml`) runs every scenario twice: in the Linux container,
+and natively on a macOS runner (`apply-macos`) so the suite is exercised on the
+OS these dotfiles actually target -- keep the harness free of GNU-only
+`stat -c` / `find -printf` for that reason. Details and limitations: `tests/README.md`.
+
 ## Configuration Structure
 
 ### Shell Configuration (`dev/`)

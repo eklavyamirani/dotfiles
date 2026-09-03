@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Stand-in for Homebrew, used only by the container CI tests.
+#
+# The tests clone this directory in place of https://github.com/Homebrew/brew
+# (via a git `insteadOf` rewrite in the sandbox HOME), so bootstrap.sh runs its
+# real "install Homebrew into ~/.homebrew" step against a local, offline repo
+# instead of downloading several hundred MB of Homebrew and building bottles
+# that don't exist for this container anyway.
+#
+# What it deliberately keeps real:
+#   - it lives at $HOME/.homebrew/bin/brew, so bootstrap's `skip_if` guard and
+#     the .zprofile.d/50-homebrew-isolated.zsh pin both resolve to the same
+#     path they would on a real machine
+#   - `shellenv` emits the same exports real brew does, so PATH handling and
+#     the isolation tripwire are exercised for real
+#   - `install` / `bundle` create shims in $HOMEBREW_PREFIX/bin, so later steps
+#     (stow, mise activation) find the tools where Homebrew would have put them
+#
+# Every invocation is appended to $BREW_CALL_LOG so tests can assert on what
+# bootstrap actually asked Homebrew to do.
+set -uo pipefail
+
+PREFIX="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The whole point of this setup is that Homebrew lives inside the account's
+# home directory. If it ever doesn't, fail loudly rather than pass a test that
+# silently stopped checking isolation.
+case "$PREFIX/" in
+  "$HOME"/*) ;;
+  *)
+    printf 'brew stub: prefix %s is outside HOME (%s) -- isolation broken\n' "$PREFIX" "$HOME" >&2
+    exit 1
+    ;;
+esac
+
+BREW_CALL_LOG="${BREW_CALL_LOG:-$PREFIX/brew-calls.log}"
+SHIM_LOG="${BREW_SHIM_LOG:-$PREFIX/shim-calls.log}"
+printf '%s\n' "$*" >>"$BREW_CALL_LOG"
+
+# A shim stands in for a formula's binary. If the container already ships a
+# real one (stow, git, ...) the shim execs it, so the test exercises the real
+# tool; otherwise it is an inert no-op that records the call.
+make_shim() {
+  local name="$1" real=""
+  case "$name" in
+    */*|'') return 0 ;;
+  esac
+  real="$(PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin command -v "$name" 2>/dev/null || true)"
+  mkdir -p "$PREFIX/bin"
+  if [ -n "$real" ]; then
+    printf '#!/bin/sh\nexec %s "$@"\n' "$real" >"$PREFIX/bin/$name"
+  else
+    # Silent on stdout on purpose: `eval "$(mise activate zsh)"` in
+    # .zprofile.d/55-mise.zsh evaluates whatever a shim prints.
+    printf '#!/bin/sh\nprintf "%%s %%s\\n" "%s" "$*" >>"%s"\nexit 0\n' \
+      "$name" "$SHIM_LOG" >"$PREFIX/bin/$name"
+  fi
+  chmod +x "$PREFIX/bin/$name"
+}
+
+# Formulae/casks named by a Brewfile, one per line: `brew "foo"` / `cask "bar"`,
+# ignoring comments (whole-line and trailing).
+brewfile_entries() {
+  sed -e 's/#.*$//' "$1" |
+    sed -n -E 's/^[[:space:]]*(brew|cask)[[:space:]]+"([^"]+)".*/\1 \2/p'
+}
+
+command="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$command" in
+  shellenv)
+    printf 'export HOMEBREW_PREFIX=%q;\n' "$PREFIX"
+    printf 'export HOMEBREW_CELLAR=%q;\n' "$PREFIX/Cellar"
+    printf 'export HOMEBREW_REPOSITORY=%q;\n' "$PREFIX"
+    printf 'export PATH=%q"${PATH+:$PATH}";\n' "$PREFIX/bin:$PREFIX/sbin"
+    ;;
+  --prefix|--repository)
+    printf '%s\n' "$PREFIX"
+    ;;
+  install)
+    for formula in "$@"; do
+      case "$formula" in
+        -*) continue ;;
+      esac
+      make_shim "$formula"
+      printf '%s\n' "$formula" >>"$PREFIX/installed.txt"
+    done
+    ;;
+  bundle)
+    file=""
+    for arg in "$@"; do
+      case "$arg" in
+        --file=*) file="${arg#--file=}" ;;
+      esac
+    done
+    if [ -z "$file" ]; then
+      printf 'brew stub: bundle without --file=\n' >&2
+      exit 1
+    fi
+    if [ ! -f "$file" ]; then
+      printf 'brew stub: Brewfile not found: %s\n' "$file" >&2
+      exit 1
+    fi
+    while read -r kind name; do
+      [ -z "${name:-}" ] && continue
+      [ "$kind" = brew ] && make_shim "$name"
+      printf '%s\n' "$name" >>"$PREFIX/bundled.txt"
+    done < <(brewfile_entries "$file")
+    ;;
+  list)
+    [ -f "$PREFIX/installed.txt" ] && cat "$PREFIX/installed.txt"
+    [ -f "$PREFIX/bundled.txt" ] && cat "$PREFIX/bundled.txt"
+    ;;
+  *)
+    printf 'brew stub: unsupported command: %s %s\n' "$command" "$*" >&2
+    exit 1
+    ;;
+esac

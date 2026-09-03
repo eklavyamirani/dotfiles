@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: apply (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          # 1. full apply of the configuration from scratch, in a container
+          - 01-fresh-apply
+          # 2. re-apply of new changes onto an existing configuration
+          - 02-reapply
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the test container
+        run: docker build -f tests/Dockerfile -t dotfiles-ci tests/
+
+      # --network none: the scenarios stand up local git remotes for Homebrew
+      # and the external repos, so a run that reaches for the network is a bug,
+      # not a flake. The checkout is mounted read-only -- each scenario copies
+      # it into its own throwaway $HOME.
+      - name: Run scenario
+        run: |
+          docker run --rm --network none \
+            --volume "$PWD:/repo:ro" \
+            --env SOURCE_REPO=/repo \
+            dotfiles-ci /repo/tests/run-tests.sh '${{ matrix.scenario }}'
+
+  # Single stable check to mark as required in the branch protection rule /
+  # ruleset for main. Requiring the matrix jobs directly would mean pinning
+  # "apply (01-fresh-apply)" and "apply (02-reapply)" by name, and a required
+  # check that no longer exists blocks every PR -- so renaming a scenario or
+  # adding a third one would silently wedge the repo. This job's name never
+  # changes, and it fails unless every scenario in the matrix passed.
+  #
+  # Keep this workflow free of `paths:` filters: a required check that never
+  # reports leaves PRs permanently un-mergeable.
+  apply-tests:
+    name: apply tests
+    if: always()
+    needs: apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every scenario to have passed
+        env:
+          RESULT: ${{ needs.apply.result }}
+        run: |
+          printf 'apply matrix result: %s\n' "$RESULT"
+          [ "$RESULT" = success ] || exit 1
