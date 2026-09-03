@@ -184,3 +184,24 @@ pi-local "Help me refactor this" @file.py
 
 Profiles: `coding` (default), `thinking`, `instruct`. See
 `~/.config/llama-server/README.md` for details.
+
+## Tests
+
+Two container scenarios cover the deploy end to end -- a full apply from
+scratch, and a re-apply of new changes onto an already-configured account.
+They run the real `bootstrap.sh` against the real manifests, with local git
+repositories standing in for the Homebrew and external-repo remotes, so the
+whole suite runs offline (`--network none` in CI).
+
+```bash
+docker build -f tests/Dockerfile -t dotfiles-ci tests/
+docker run --rm --network none -v "$PWD:/repo:ro" -e SOURCE_REPO=/repo \
+  dotfiles-ci /repo/tests/run-tests.sh
+```
+
+Both run on every push and pull request (`.github/workflows/ci.yml`). The
+workflow also has an `apply tests` job that passes only if every scenario in
+the matrix passed -- mark that one as the required status check on `main`
+rather than the individual `apply (...)` jobs, so adding or renaming a
+scenario can't leave a required check that never reports. See
+`tests/README.md` for what is real, what is stubbed, and why.
