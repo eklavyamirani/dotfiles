@@ -19,6 +19,13 @@ printf 'sandbox: %s\n' "$SANDBOX"
 section "preconditions: nothing is deployed yet"
 assert_missing "no ~/.zshrc before bootstrap"      "$HOME/.zshrc"
 assert_missing "no ~/.homebrew before bootstrap"   "$HOME/.homebrew"
+# Recorded before bootstrap runs so the isolation check below can prove this
+# run left any pre-existing system Homebrew alone.
+opt_homebrew_state() {
+  [ -d /opt/homebrew ] || { printf 'absent\n'; return; }
+  find /opt/homebrew -maxdepth 1 2>/dev/null | sort | cksum
+}
+OPT_HOMEBREW_BEFORE="$(opt_homebrew_state)"
 assert_missing "no ~/.config/nvim before bootstrap" "$HOME/.config/nvim"
 
 repo_before="$(repo_tree_snapshot)"
@@ -50,7 +57,16 @@ assert_true "transcript written under ~/.local/state/dotfiles" test -n "$log_fil
 section "Homebrew isolation"
 assert_true "~/.homebrew is a git checkout" test -d "$HOME/.homebrew/.git"
 assert_true "brew is executable at ~/.homebrew/bin/brew" test -x "$HOME/.homebrew/bin/brew"
-assert_missing "nothing installed to /opt/homebrew" /opt/homebrew
+# A macOS runner (and any Mac with an admin Homebrew) already has
+# /opt/homebrew; what matters is that this bootstrap did not create or write to
+# it, not that it is absent. Compare before and after instead of asserting the
+# machine is bare.
+if [ "$OPT_HOMEBREW_BEFORE" = absent ]; then
+  assert_missing "bootstrap did not create /opt/homebrew" /opt/homebrew
+else
+  assert_eq "bootstrap did not touch the pre-existing /opt/homebrew" \
+    "$OPT_HOMEBREW_BEFORE" "$(opt_homebrew_state)"
+fi
 assert_missing "nothing installed to /usr/local/Homebrew" /usr/local/Homebrew
 assert_file_has "brew install ran for stow and mise" "$BREW_CALL_LOG" '^install stow mise$'
 assert_file_has "brew bundle used the repo Brewfile" "$BREW_CALL_LOG" "^bundle --file=$REPO/dev/Brewfile$"
@@ -99,7 +115,22 @@ assert_file_has "EDITOR is nvim"             "$zsh_out" '^EDITOR=nvim$'
 assert_file_has "NVIM_APPNAME is set"        "$zsh_out" '^NVIM_APPNAME=nvim$'
 assert_file_has "HOMEBREW_PREFIX is the isolated prefix" "$zsh_out" "^HOMEBREW_PREFIX=$HOME/.homebrew$"
 assert_file_lacks "no isolation tripwire warning" "$zsh_out" 'isolation may be broken'
-assert_file_lacks "no other Homebrew is writable" "$zsh_out" 'should stay isolated'
+# The tripwire in .zprofile.d/50-homebrew-isolated.zsh warns when another
+# account's Homebrew prefix is writable from here. In the Linux container none
+# exists, so it must stay quiet; on the macOS runner /opt/homebrew is present
+# and writable by the CI user, so it must speak up. Asserting the behaviour the
+# environment actually calls for tests the tripwire in both directions instead
+# of only ever checking that it is silent.
+foreign_writable=0
+for foreign_prefix in /opt/homebrew /usr/local/Homebrew; do
+  [ -d "$foreign_prefix" ] && [ -w "$foreign_prefix" ] && foreign_writable=1
+done
+if [ "$foreign_writable" = 1 ]; then
+  assert_file_has "tripwire warns that another Homebrew is writable" \
+    "$zsh_out" 'should stay isolated'
+else
+  assert_file_lacks "no other Homebrew is writable" "$zsh_out" 'should stay isolated'
+fi
 
 section "the deployed sync script is the one on PATH"
 assert_symlink_to "~/.local/bin/sync-external-repos is linked" \

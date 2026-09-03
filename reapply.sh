@@ -28,7 +28,12 @@
 #     unattended use.
 set -uo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# pwd -P, not pwd: the dangling-link scan resolves each link's target with
+# `pwd -P` and compares it against this prefix, so both sides must have their
+# symlinks resolved. With a logical path here, a repository reached through a
+# symlinked parent (/tmp and /var are symlinks on macOS) would never match its
+# own links, and stale ones would silently survive.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PACKAGE="dev"
 TARGET="$HOME"
 DRY_RUN=0

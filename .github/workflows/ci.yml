@@ -38,6 +38,36 @@ jobs:
             --env SOURCE_REPO=/repo \
             dotfiles-ci /repo/tests/run-tests.sh '${{ matrix.scenario }}'
 
+  # The container job proves the manifests work on a bare account; this one
+  # proves they work on the OS the dotfiles are actually for. macOS runners
+  # cannot run the Linux container, so the suite runs natively here -- which is
+  # why the harness avoids GNU-only `stat -c` / `find -printf`.
+  apply-macos:
+    name: apply-macos (${{ matrix.scenario }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - 01-fresh-apply
+          - 02-reapply
+    steps:
+      - uses: actions/checkout@v7
+
+      # stow is the one prerequisite the runner image does not ship. Everything
+      # else the suite needs (bash, git, python3, zsh, tar, find) is preinstalled.
+      # The runner's own Homebrew is used only to install it; the scenarios still
+      # run against the stub in their sandbox HOME.
+      - name: Install stow
+        run: brew install stow
+
+      # No --network none equivalent here, but the scenarios still stand up local
+      # git remotes and never reach out; the container job is what enforces that.
+      - name: Run scenario
+        env:
+          SOURCE_REPO: ${{ github.workspace }}
+        run: tests/run-tests.sh '${{ matrix.scenario }}'
+
   # Single stable check to mark as required in the branch protection rule /
   # ruleset for main. Requiring the matrix jobs directly would mean pinning
   # "apply (01-fresh-apply)" and "apply (02-reapply)" by name, and a required
@@ -50,12 +80,15 @@ jobs:
   apply-tests:
     name: apply tests
     if: always()
-    needs: apply
+    needs: [apply, apply-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Require every scenario to have passed
         env:
           RESULT: ${{ needs.apply.result }}
+          RESULT_MACOS: ${{ needs.apply-macos.result }}
         run: |
-          printf 'apply matrix result: %s\n' "$RESULT"
+          printf 'apply matrix result:       %s\n' "$RESULT"
+          printf 'apply-macos matrix result: %s\n' "$RESULT_MACOS"
           [ "$RESULT" = success ] || exit 1
+          [ "$RESULT_MACOS" = success ] || exit 1

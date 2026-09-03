@@ -1,12 +1,12 @@
 # Apply tests
 
-Two container scenarios that run the real `bootstrap.sh` against the real
-manifests and assert on what actually lands in `$HOME`:
+Two scenarios that run the real `bootstrap.sh` and `reapply.sh` against the
+real manifests and assert on what actually lands in `$HOME`:
 
 | Scenario | What it covers |
 | --- | --- |
 | `scenarios/01-fresh-apply.sh` | Full apply from scratch: empty `$HOME`, one `./bootstrap.sh`, everything deployed. |
-| `scenarios/02-reapply.sh` | Re-apply onto an existing configuration: new snippets/dirs/Brewfile entries/external repos, upstream moving forward, a third no-op run, and the two ways a re-apply is supposed to fail. |
+| `scenarios/02-reapply.sh` | Re-apply onto an existing configuration with `./reapply.sh` (the path a user takes after `git pull`): new snippets/dirs/Brewfile entries/external repos, upstream moving forward, a no-op rerun, links stranded by an upstream rename, Homebrew drift reported and pruned only on `--prune`, the prune guard, and the ways a re-apply is supposed to fail. |
 
 ## Running them
 
@@ -22,8 +22,9 @@ docker run --rm --network none -v "$PWD:/repo:ro" -e SOURCE_REPO=/repo \
 `python3`, `stow` and `zsh`; the container just guarantees a bare account.
 Everything a scenario touches lives in a throwaway sandbox under `$TMPDIR`, and
 `$HOME` is redirected there — running the suite never touches your real home
-directory. It is macOS-hostile only in that `stat -c` and `find -printf` are
-GNU-only, so run it in the container on a Mac.
+directory. The suite is portable: it runs natively on macOS too (that is what
+the `apply-macos` CI job does), so it avoids GNU-only `stat -c` and
+`find -printf`. Running it natively needs `stow` on PATH.
 
 ## How the sandbox works
 
@@ -48,10 +49,11 @@ Each scenario builds a self-contained world:
 ## What is real and what is not
 
 Real: `bootstrap.sh`'s step runner, ordering, `skip_if` handling and halt-on-
-failure; `bootstrap-steps.json`; `prepare-stow-targets.sh`; GNU `stow`;
+failure; `reapply.sh`'s plan/prune/backup logic and its failsafes;
+`bootstrap-steps.json`; `prepare-stow-targets.sh`; `stow`;
 `sync-external-repos` with real `git clone` / `git pull --ff-only`; the deployed
 `.zprofile` chain loaded by real `zsh`; the `Brewfile` parsed into the package
-list bootstrap asks Homebrew for.
+list bootstrap asks Homebrew for; `link-docker-cli-plugins`.
 
 Not real: Homebrew itself, and therefore the packages. Installing real Homebrew
 in CI would download hundreds of MB and build Linux bottles for formulae
@@ -59,7 +61,10 @@ in CI would download hundreds of MB and build Linux bottles for formulae
 flaky enough to make the signal worse, not better. What the tests do assert is
 that bootstrap asks Homebrew for exactly the right things (`install stow mise`,
 `bundle --file=<repo>/dev/Brewfile`, every non-commented `Brewfile` entry) and
-that it does so against `~/.homebrew`. macOS-only behaviour
+that it does so against `~/.homebrew`, and — for `reapply.sh` — that drift is
+computed from what the stub records as installed versus what the Brewfile
+declares. `mise` is a no-op shim, so the tests assert that `mise install` is
+invoked, not that a runtime is downloaded. macOS-only behaviour
 (`60-terminal-appearance.zsh`'s Terminal.app import, `.macos` defaults) is not
 covered — it no-ops off macOS.
 
@@ -70,4 +75,5 @@ new managed file or directory is covered automatically — no test edit needed.
 A new `scenarios/NN-name.sh` (source `lib/harness.sh`, call `sandbox_create`,
 `trap sandbox_destroy EXIT`, end with `finish`) is picked up by
 `run-tests.sh` automatically; add it to the matrix in
-`.github/workflows/ci.yml` to give it its own CI check.
+`.github/workflows/ci.yml` — to **both** the `apply` (Linux container) and
+`apply-macos` (native) jobs — to give it its own CI check.

@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Scenario 2: re-apply new changes onto an already-configured account.
 #
-# Starts from the state scenario 1 produces, then does what actually happens in
-# practice: the repository gains new snippets, new nested config directories, an
-# edited managed file, a new Brewfile entry and a new external repo, while the
-# external repo's remote moves forward. Re-running bootstrap must pick all of
-# that up, leave existing links and user state alone, stay idempotent on a third
-# no-op run, and fail loudly (without clobbering anything) when it can't.
+# The fresh-machine path is bootstrap.sh (scenario 1). This scenario covers the
+# path a user actually takes afterwards -- `git pull && ./reapply.sh` -- so it
+# drives reapply.sh, not bootstrap.sh, for every run after the baseline.
+#
+# It starts from the state scenario 1 produces, then does what really happens:
+# the repository gains new snippets, new nested config directories, an edited
+# managed file, a new Brewfile entry and a new external repo, while the external
+# repo's remote moves forward. On top of that it exercises the reconciliation
+# reapply.sh exists for and bootstrap cannot do: pruning links stranded by an
+# upstream rename, reporting Homebrew drift, removing undeclared packages only
+# when asked, and moving a conflicting real file aside instead of clobbering it.
 
 CURRENT_SCENARIO="02-reapply"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/harness.sh"
@@ -24,7 +29,7 @@ assert_true "baseline deployed ~/.zshrc" test -L "$HOME/.zshrc"
 assert_true "baseline cloned the nvim config" test -d "$HOME/.config/nvim/.git"
 
 links_before="$(home_link_snapshot)"
-zshrc_inode_before="$(stat -c %i "$HOME/.zshrc")"
+zshrc_inode_before="$(inode "$HOME/.zshrc")"
 nvim_root_before="$(git -C "$HOME/.config/nvim" rev-list --max-parents=0 HEAD)"
 brew_clone_before="$(git -C "$HOME/.homebrew" rev-parse HEAD)"
 
@@ -77,23 +82,25 @@ nvim_target="$(origin_head nvim-config)"
 git -C "$REPO" add -A
 git -C "$REPO" commit --quiet -m 'CI: new snippet, new dirs, new Brewfile entry, new external repo'
 repo_after_change="$(repo_tree_snapshot)"
-bundle_calls_before="$(grep -c '^bundle ' "$BREW_CALL_LOG")"
+bundle_calls_before="$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
 
 # --------------------------------------------------------------------------
 section "re-apply onto the existing configuration"
 # --------------------------------------------------------------------------
-assert_true "re-run of bootstrap exits 0" run_bootstrap
-cp "$BOOTSTRAP_OUT" "$SANDBOX/reapply.out"
-out="$SANDBOX/reapply.out"
-assert_file_has "reports completion" "$out" 'bootstrap complete'
+assert_true "reapply exits 0" run_reapply
+out="$REAPPLY_OUT"
+assert_file_has "reports completion" "$out" 're-apply complete'
+assert_file_has "prints a plan before acting" "$out" '^\[[^]]*\] PLAN$'
+assert_file_has "logs its transcript path" "$out" 'transcript: .*/reapply-[0-9]+-[0-9]+\.log'
 
-section "already-satisfied steps are skipped, the rest re-run"
-assert_file_has "Homebrew install skipped by skip_if" "$out" '==> install Homebrew into ~/.homebrew \(skipped, already done\)'
+section "every reconcile step runs"
+assert_file_has "stow re-ran" "$out" '==> stow -R dev'
+assert_file_has "external repo sync ran" "$out" '==> sync-external-repos'
+assert_file_has "brew bundle ran" "$out" '==> brew bundle'
+assert_file_has "docker cli plugins were wired" "$out" '==> link docker cli plugins'
+assert_file_lacks "reapply does not reinstall Homebrew" "$out" 'install Homebrew'
 assert_eq "existing ~/.homebrew checkout untouched" \
   "$brew_clone_before" "$(git -C "$HOME/.homebrew" rev-parse HEAD)"
-assert_file_has "stow re-ran" "$out" '==> stow dev profile$'
-assert_file_has "external repo sync re-ran" "$out" '==> sync external repos'
-assert_file_has "brew bundle re-ran" "$out" '==> install Brewfile packages$'
 
 section "new configuration is deployed"
 assert_symlink_to "new snippet linked" \
@@ -109,7 +116,7 @@ assert_true "new snippet is picked up by the profile loader" \
 
 section "existing deployment is left alone"
 assert_eq "~/.zshrc is still the same link (not replaced)" \
-  "$zshrc_inode_before" "$(stat -c %i "$HOME/.zshrc")"
+  "$zshrc_inode_before" "$(inode "$HOME/.zshrc")"
 assert_file_has "edits to a managed file show through the link" "$HOME/.zshrc" '^export DOTFILES_CI_ZSHRC_EDIT=1$'
 assert_true "user state in a managed directory survives" test -f "$HOME/.pi/agent/runtime-state.json"
 assert_file_has "user state contents survive" "$HOME/.pi/agent/runtime-state.json" 'keep me'
@@ -127,23 +134,105 @@ assert_eq "newly listed repo is at its tip" \
   "$(origin_head ci-extra-repo)" "$(git -C "$HOME/.local/share/ci-extra-tool" rev-parse HEAD 2>/dev/null)"
 
 section "new Brewfile entry is installed"
+assert_file_has "reapply planned the missing package" "$out" 'brew bundle will install declared-but-absent'
 assert_file_has "brew bundle saw the new entry" "$HOME/.homebrew/bundled.txt" '^jq$'
 assert_eq "brew bundle ran exactly once more" \
-  "$((bundle_calls_before + 1))" "$(grep -c '^bundle ' "$BREW_CALL_LOG")"
+  "$((bundle_calls_before + 1))" "$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
+
+section "runtimes and docker plugins are reconciled too"
+assert_file_has "mise was asked to install the pinned runtimes" "$BREW_SHIM_LOG" '^mise install$'
+for plugin in docker-buildx docker-compose; do
+  assert_symlink_to "docker plugin wired: $plugin" \
+    "$HOME/.docker/cli-plugins/$plugin" "$HOME/.homebrew/bin/$plugin"
+done
+assert_missing "the docker binary itself is not linked as a plugin" \
+  "$HOME/.docker/cli-plugins/docker"
 
 section "re-apply still does not write into the repository"
 assert_eq "repository tree unchanged by the re-apply" "$repo_after_change" "$(repo_tree_snapshot)"
 assert_eq "repository working tree is clean" "" "$(git -C "$REPO" status --porcelain)"
 
 # --------------------------------------------------------------------------
-section "a third run with nothing changed is a no-op"
+section "a second run with nothing changed is a no-op"
 # --------------------------------------------------------------------------
 links_settled="$(home_link_snapshot)"
-assert_true "third bootstrap run exits 0" run_bootstrap
+assert_true "repeat reapply exits 0" run_reapply
 assert_eq "deployed links are byte-identical" "$links_settled" "$(home_link_snapshot)"
+assert_file_has "reports no dangling links to remove" "$REAPPLY_OUT" 'no dangling symlinks to remove'
+assert_file_has "reports no Homebrew drift" "$REAPPLY_OUT" 'no Homebrew drift'
 assert_eq "nvim clone stays at the same commit" \
   "$nvim_target" "$(git -C "$HOME/.config/nvim" rev-parse HEAD)"
 assert_eq "repository still clean" "" "$(git -C "$REPO" status --porcelain)"
+
+# --------------------------------------------------------------------------
+section "a file renamed upstream leaves no dangling link behind"
+# --------------------------------------------------------------------------
+# The reason reapply.sh exists. `stow -R` unstows using the package's CURRENT
+# contents, so a renamed file's old link survives, pointing at nothing -- and
+# .zprofile globs .zprofile.d/*.zsh, so one stale link breaks every new shell.
+git -C "$REPO" mv dev/.zprofile.d/40-ci-added-snippet.zsh dev/.zprofile.d/45-ci-renamed-snippet.zsh
+git -C "$REPO" commit --quiet -m 'CI: rename a snippet, as an upstream change would'
+
+assert_true "link to the pre-rename name still exists before reapply" \
+  test -L "$HOME/.zprofile.d/40-ci-added-snippet.zsh"
+assert_true "reapply after a rename exits 0" run_reapply
+assert_file_has "reports the stale link it removed" "$REAPPLY_OUT" \
+  'removed dangling link: .*/\.zprofile\.d/40-ci-added-snippet\.zsh'
+assert_missing "the stale link is gone" "$HOME/.zprofile.d/40-ci-added-snippet.zsh"
+assert_symlink_to "the renamed file is linked under its new name" \
+  "$HOME/.zprofile.d/45-ci-renamed-snippet.zsh" "$REPO/dev/.zprofile.d/45-ci-renamed-snippet.zsh"
+assert_true "a login shell still works after the rename" \
+  bash -c 'zsh -c "source \"$HOME/.zprofile\"; [ \"\$DOTFILES_CI_ADDED_SNIPPET\" = 1 ]"'
+
+section "links that are not this repository's business are left alone"
+mkdir -p "$HOME/.zprofile.d"
+ln -sfn /nowhere/at/all.zsh "$HOME/.zprofile.d/99-foreign.zsh"
+assert_true "reapply exits 0 with a foreign dangling link present" run_reapply
+assert_true "foreign dangling link survives" test -L "$HOME/.zprofile.d/99-foreign.zsh"
+assert_file_lacks "reapply did not claim to remove it" "$REAPPLY_OUT" '99-foreign'
+rm -f "$HOME/.zprofile.d/99-foreign.zsh"
+
+# --------------------------------------------------------------------------
+section "a package installed out of band is reported, and removed only on --prune"
+# --------------------------------------------------------------------------
+"$HOME/.homebrew/bin/brew" install straggler >/dev/null 2>&1
+
+assert_true "reapply exits 0 with drift present" run_reapply
+assert_file_has "drift is reported" "$REAPPLY_OUT" 'DRIFT: 1 package\(s\) installed but not declared'
+assert_file_has "names the undeclared package" "$REAPPLY_OUT" '^ +straggler$'
+assert_file_has "points at the fix" "$REAPPLY_OUT" 'rerun with --prune'
+assert_file_has "still installed: drift alone never removes" "$HOME/.homebrew/installed.txt" '^straggler$'
+
+assert_true "reapply --prune exits 0" run_reapply --prune
+assert_file_has "announces the uninstall" "$REAPPLY_OUT" 'UNINSTALL 1 package\(s\)'
+assert_file_has "uninstalled it" "$HOME/.homebrew/uninstalled.txt" '^straggler$'
+assert_file_lacks "no longer installed" "$HOME/.homebrew/installed.txt" '^straggler$'
+assert_missing "its shim is gone" "$HOME/.homebrew/bin/straggler"
+
+section "declared packages are never pruned"
+while read -r pkg; do
+  assert_file_lacks "declared package not uninstalled: $pkg" \
+    "$HOME/.homebrew/uninstalled.txt" "^${pkg}$"
+done < <(sed -e 's/#.*$//' "$REPO/dev/Brewfile" |
+           sed -n -E 's/^[[:space:]]*brew[[:space:]]+"([^"]+)".*/\1/p' | head -5)
+
+# --------------------------------------------------------------------------
+section "--prune refuses to act on a Brewfile it cannot read"
+# --------------------------------------------------------------------------
+# An empty or unparseable manifest makes every installed package look
+# undeclared. Pruning on that would wipe the account, so it must refuse.
+"$HOME/.homebrew/bin/brew" install another-straggler >/dev/null 2>&1
+installed_before_guard="$(sort "$HOME/.homebrew/installed.txt")"
+cp "$REPO/dev/Brewfile" "$SANDBOX/Brewfile.bak"
+: >"$REPO/dev/Brewfile"
+
+assert_false "reapply --prune exits non-zero on an empty Brewfile" run_reapply --prune
+assert_file_has "says why it refused" "$REAPPLY_OUT" 'refusing to prune'
+assert_eq "nothing was uninstalled" \
+  "$installed_before_guard" "$(sort "$HOME/.homebrew/installed.txt")"
+
+cp "$SANDBOX/Brewfile.bak" "$REPO/dev/Brewfile"
+run_reapply --prune >/dev/null 2>&1 || true   # settle: drop the straggler again
 
 # --------------------------------------------------------------------------
 section "a re-apply that cannot fast-forward fails loudly and changes nothing"
@@ -151,28 +240,34 @@ section "a re-apply that cannot fast-forward fails loudly and changes nothing"
 printf '\n-- local edit the user has not committed\n' >>"$HOME/.config/nvim/init.lua"
 nvim_local_sum="$(cksum <"$HOME/.config/nvim/init.lua")"
 origin_commit nvim-config init.lua '-- upstream moved again, conflicting'
-bundle_calls_before="$(grep -c '^bundle ' "$BREW_CALL_LOG")"
+bundle_calls_before="$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
 
-assert_false "bootstrap exits non-zero when a repo cannot be fast-forwarded" run_bootstrap
-cp "$BOOTSTRAP_OUT" "$SANDBOX/conflict.out"
-out="$SANDBOX/conflict.out"
+assert_false "reapply exits non-zero when a repo cannot be fast-forwarded" run_reapply
+out="$REAPPLY_OUT"
 assert_file_has "names the repo that failed" "$out" 'pull failed for .*/\.config/nvim'
-assert_file_has "halts the run at that step" "$out" 'ERROR: step failed: sync external repos'
-assert_file_lacks "does not report completion" "$out" 'bootstrap complete'
+assert_file_lacks "does not report completion" "$out" 're-apply complete'
 assert_eq "the user's local edit is untouched" "$nvim_local_sum" "$(cksum <"$HOME/.config/nvim/init.lua")"
 assert_eq "later steps did not run" \
-  "$bundle_calls_before" "$(grep -c '^bundle ' "$BREW_CALL_LOG")"
+  "$bundle_calls_before" "$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
 
 # --------------------------------------------------------------------------
-section "re-applying over a pre-existing real file refuses to clobber it"
+section "re-applying over a pre-existing real file backs it up instead of clobbering"
 # --------------------------------------------------------------------------
+# Where bootstrap.sh halts on a stow conflict, reapply.sh moves the real file
+# into a timestamped backup directory and continues -- the file is never lost.
 sandbox_destroy
 sandbox_create
+assert_true "baseline bootstrap for the backup check" run_bootstrap
+rm -f "$HOME/.zshrc"
 printf '# hand-written zshrc that predates the dotfiles\n' >"$HOME/.zshrc"
 conflicting_sum="$(cksum <"$HOME/.zshrc")"
-assert_false "bootstrap exits non-zero on a stow conflict" run_bootstrap
-assert_file_has "halts at the stow step" "$BOOTSTRAP_OUT" 'ERROR: step failed: stow dev profile'
-assert_eq "the pre-existing file is left exactly as it was" "$conflicting_sum" "$(cksum <"$HOME/.zshrc")"
-assert_true "~/.zshrc was not turned into a link" test ! -L "$HOME/.zshrc"
+
+assert_true "reapply exits 0 over a conflicting real file" run_reapply
+assert_file_has "reports the backup" "$REAPPLY_OUT" 'backed up conflicting file: \.zshrc'
+assert_true "the managed link is now in place" test -L "$HOME/.zshrc"
+backup="$(find "$HOME/.local/state/dotfiles" -name .zshrc -path '*/backup-*' | head -1)"
+assert_true "a backup copy exists" test -n "$backup"
+assert_eq "the backup is byte-identical to what was there" \
+  "$conflicting_sum" "$(cksum <"$backup")"
 
 finish

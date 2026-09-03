@@ -15,6 +15,10 @@
 #     the isolation tripwire are exercised for real
 #   - `install` / `bundle` create shims in $HOMEBREW_PREFIX/bin, so later steps
 #     (stow, mise activation) find the tools where Homebrew would have put them
+#   - the query surface reapply.sh reconciles against (`bundle list`, `list`,
+#     `leaves`, `uninstall`) is modelled well enough that drift is computed
+#     from real state: what a Brewfile declares vs what this stub recorded as
+#     installed, with formulae and casks tracked separately
 #
 # Every invocation is appended to $BREW_CALL_LOG so tests can assert on what
 # bootstrap actually asked Homebrew to do.
@@ -25,8 +29,16 @@ PREFIX="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The whole point of this setup is that Homebrew lives inside the account's
 # home directory. If it ever doesn't, fail loudly rather than pass a test that
 # silently stopped checking isolation.
-case "$PREFIX/" in
-  "$HOME"/*) ;;
+# Normalise both sides before comparing. $PREFIX has been through `cd && pwd`,
+# so doubled slashes are collapsed and (with -P) symlinks resolved, while a raw
+# $HOME may contain neither -- on macOS TMPDIR ends in a slash and /var is a
+# symlink to /private/var. Comparing the raw strings would call a perfectly
+# isolated macOS run a breach.
+PREFIX_PHYSICAL="$(cd "$PREFIX" 2>/dev/null && pwd -P || printf '%s' "$PREFIX")"
+HOME_LOGICAL="$(cd "$HOME" 2>/dev/null && pwd || printf '%s' "$HOME")"
+HOME_PHYSICAL="$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")"
+case "$PREFIX/;$PREFIX_PHYSICAL/" in
+  "$HOME_LOGICAL"/*|*";$HOME_PHYSICAL"/*) ;;
   *)
     printf 'brew stub: prefix %s is outside HOME (%s) -- isolation broken\n' "$PREFIX" "$HOME" >&2
     exit 1
@@ -37,15 +49,41 @@ BREW_CALL_LOG="${BREW_CALL_LOG:-$PREFIX/brew-calls.log}"
 SHIM_LOG="${BREW_SHIM_LOG:-$PREFIX/shim-calls.log}"
 printf '%s\n' "$*" >>"$BREW_CALL_LOG"
 
-# A shim stands in for a formula's binary. If the container already ships a
-# real one (stow, git, ...) the shim execs it, so the test exercises the real
-# tool; otherwise it is an inert no-op that records the call.
+# A shim stands in for a formula's binary. For the few tools a scenario needs to
+# actually work (stow does the linking under test) the shim execs the real one.
+# Everything else stays inert, whether or not the host happens to have it: when
+# the suite runs natively on a developer's Mac, exec'ing the real `mise` would
+# have it download a real runtime, and the real `docker`/`colima`/`hf` have no
+# business being invoked by a test at all.
+SHIM_REAL_TOOLS="${SHIM_REAL_TOOLS:-stow git}"
 make_shim() {
   local name="$1" real=""
   case "$name" in
     */*|'') return 0 ;;
   esac
-  real="$(PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin command -v "$name" 2>/dev/null || true)"
+  # Look for a real implementation anywhere on PATH except this stub's own bin
+  # (which would make the shim exec itself). A hardcoded system PATH would miss
+  # /opt/homebrew on the macOS runner, where stow actually lives.
+  # Only allowlisted tools look for a real implementation.
+  case " $SHIM_REAL_TOOLS " in
+    *" $name "*) ;;
+    *) real="" ; _write_shim "$name" "" ; return 0 ;;
+  esac
+  local search=""
+  local entry
+  local IFS_SAVE="$IFS"
+  IFS=:
+  for entry in $PATH; do
+    case "$entry" in ""|"$PREFIX/bin") continue ;; esac
+    search="${search:+$search:}$entry"
+  done
+  IFS="$IFS_SAVE"
+  real="$(PATH="$search" command -v "$name" 2>/dev/null || true)"
+  _write_shim "$name" "$real"
+}
+
+_write_shim() { # name, real path (empty for an inert shim)
+  local name="$1" real="$2"
   mkdir -p "$PREFIX/bin"
   if [ -n "$real" ]; then
     printf '#!/bin/sh\nexec %s "$@"\n' "$real" >"$PREFIX/bin/$name"
@@ -88,6 +126,30 @@ case "$command" in
     done
     ;;
   bundle)
+    # `brew bundle list --formula|--cask|--tap --file=X` -- what the Brewfile
+    # DECLARES. reapply.sh diffs this against what is installed to find drift.
+    if [ "${1:-}" = list ]; then
+      shift
+      kind=formula file=""
+      for arg in "$@"; do
+        case "$arg" in
+          --formula) kind=formula ;;
+          --cask)    kind=cask ;;
+          --tap)     kind=tap ;;
+          --file=*)  file="${arg#--file=}" ;;
+        esac
+      done
+      [ -f "$file" ] || { printf 'brew stub: Brewfile not found: %s\n' "$file" >&2; exit 1; }
+      case "$kind" in
+        tap) sed -e 's/#.*$//' "$file" |
+               sed -n -E 's/^[[:space:]]*tap[[:space:]]+"([^"]+)".*/\1/p' ;;
+        *)   want=brew; [ "$kind" = cask ] && want=cask
+             brewfile_entries "$file" | while read -r k n; do
+               [ "$k" = "$want" ] && printf '%s\n' "$n"
+             done ;;
+      esac
+      exit 0
+    fi
     file=""
     for arg in "$@"; do
       case "$arg" in
@@ -104,13 +166,59 @@ case "$command" in
     fi
     while read -r kind name; do
       [ -z "${name:-}" ] && continue
-      [ "$kind" = brew ] && make_shim "$name"
+      if [ "$kind" = brew ]; then
+        make_shim "$name"
+        printf '%s\n' "$name" >>"$PREFIX/bundled-formulae.txt"
+      else
+        printf '%s\n' "$name" >>"$PREFIX/bundled-casks.txt"
+      fi
       printf '%s\n' "$name" >>"$PREFIX/bundled.txt"
     done < <(brewfile_entries "$file")
     ;;
   list)
-    [ -f "$PREFIX/installed.txt" ] && cat "$PREFIX/installed.txt"
-    [ -f "$PREFIX/bundled.txt" ] && cat "$PREFIX/bundled.txt"
+    # `brew list [--formula|--cask] [--full-name]` -- what is INSTALLED.
+    kind=all
+    for arg in "$@"; do
+      case "$arg" in
+        --formula) kind=formula ;;
+        --cask)    kind=cask ;;
+      esac
+    done
+    case "$kind" in
+      cask) [ -f "$PREFIX/bundled-casks.txt" ] && sort -u "$PREFIX/bundled-casks.txt" ;;
+      formula)
+        cat "$PREFIX/installed.txt" "$PREFIX/bundled-formulae.txt" 2>/dev/null | sort -u ;;
+      *)
+        cat "$PREFIX/installed.txt" "$PREFIX/bundled.txt" 2>/dev/null ;;
+    esac
+    ;;
+  leaves)
+    # Real brew reports formulae nothing else depends on; the stub has no
+    # dependency graph, so every formula it was explicitly asked to install
+    # counts as requested. That is the set reapply.sh calls drift when it is
+    # not declared, which is exactly what these tests need to exercise.
+    cat "$PREFIX/installed.txt" "$PREFIX/bundled-formulae.txt" 2>/dev/null | sort -u
+    ;;
+  uninstall)
+    is_cask=0
+    for arg in "$@"; do
+      [ "$arg" = --cask ] && is_cask=1
+    done
+    for name in "$@"; do
+      case "$name" in -*) continue ;; esac
+      if [ "$is_cask" = 1 ]; then
+        records="$PREFIX/bundled-casks.txt"
+      else
+        records="$PREFIX/installed.txt $PREFIX/bundled-formulae.txt $PREFIX/bundled.txt"
+        rm -f "$PREFIX/bin/$name"
+      fi
+      for record in $records; do
+        [ -f "$record" ] || continue
+        grep -vxF "$name" "$record" >"$record.tmp" 2>/dev/null || :
+        mv "$record.tmp" "$record"
+      done
+      printf '%s\n' "$name" >>"$PREFIX/uninstalled.txt"
+    done
     ;;
   *)
     printf 'brew stub: unsupported command: %s %s\n' "$command" "$*" >&2
