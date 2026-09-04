@@ -43,3 +43,5 @@ codex        = "0.153.4"
 
 # ---- Language runtimes ----
 python       = "3.12.14"
+claude-code = "2.1.260"
+copilot-cli = "1.0.82"
