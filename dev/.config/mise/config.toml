@@ -39,6 +39,7 @@ neovim       = "0.12.5"   # nvim
 tree-sitter  = "0.27.0"   # the CLI; :TSInstall compiles grammars with it
 colima       = "0.10.3"
 docker-cli   = "29.7.2"   # the `docker` client only -- plugins stay in Brewfile
+codex        = "0.153.4"
 
 # ---- Language runtimes ----
 python       = "3.12.14"
