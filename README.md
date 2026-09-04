@@ -50,7 +50,7 @@ shouldn't need touching. Each step entry has:
 {
   "name": "install Homebrew into ~/.homebrew",
   "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
-  "skip_if": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
+  "state": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
   "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local"
 }
 ```
@@ -59,16 +59,37 @@ shouldn't need touching. Each step entry has:
   `eval` **in the same process** (not a subshell), so `export`/`PATH`
   changes from one step (e.g. loading Homebrew's `shellenv`) persist to
   later steps, the way sourcing would in an interactive shell.
-- `skip_if` -- optional shell condition; if it exits `0`, the step is
-  skipped (e.g. "already installed" checks).
+- `state` -- optional shell condition describing **the state the step
+  exists to produce**. Checked twice: before the command (holds -> skip,
+  the work is already done) and again after it if the command reported
+  failure.
+- `skip_if` -- optional shell condition meaning **this step has no work to
+  do**, which is not the same claim as `state` (the `mise install` step
+  has nothing to do when no mise config was stowed, but "no config" is not
+  the outcome that step exists to produce). If it exits `0`, the step is
+  skipped.
 - `purpose` -- optional, shown in logs.
 
 It halts immediately on the first failing step (later steps depend on
 earlier ones succeeding), and writes a full transcript of every step's
 output to `~/.local/state/dotfiles/setup-<timestamp>.log` regardless of
 outcome, so a failure always leaves you with complete detail to diagnose.
-Every step is
-idempotent (or guarded by `skip_if`), so it's always safe to fix the issue and rerun.
+Every step is idempotent (or guarded by `skip_if`/`state`), so it's always
+safe to fix the issue and rerun.
+
+**A step fails when its declared `state` was not reached** -- the exit code
+is the fallback, used only for steps that declare no state. A command that
+exits non-zero but leaves the declared state satisfied is logged as
+`WARNING: command exited N, but the declared state was reached` and the run
+continues. This is not leniency for its own sake: `brew install` exits `1`
+when a formula's post-install hook flakes even though every requested
+formula installed, and Homebrew has a single failure exit code
+(`exit Homebrew.failed? ? 1 : 0`) shared with a genuinely missing formula.
+No exit code can separate those two; only the resulting state can. Keying
+success off the exit status alone once halted a bootstrap after a 92-minute
+`mise` build over a cert symlink unrelated to the step's purpose. The
+`WARNING` keeps the discrepancy visible rather than swallowing it, and a
+step that fails *without* reaching its state still halts the run as before.
 
 This account's Homebrew never touches `/opt/homebrew` or `/usr/local` and
 never requires an admin password. A startup tripwire in

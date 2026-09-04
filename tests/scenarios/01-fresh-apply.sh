@@ -37,18 +37,21 @@ out="$SANDBOX/fresh.out"
 
 assert_file_has "reports completion" "$out" 'bootstrap complete'
 assert_file_lacks "no step failed" "$out" 'ERROR: step failed'
-for step in \
-  'install Homebrew into ~/.homebrew' \
-  'load Homebrew into this shell' \
-  'install stow and mise' \
-  'prepare stow target directories' \
-  'stow dev profile' \
-  'sync external repos' \
-  'install pinned tools (mise)' \
-  'install Brewfile packages'
-do
+# Derived from the manifest rather than listed here, so a step added to
+# bootstrap-steps.json is covered without editing this file -- and, more to the
+# point, so the LAST step cannot quietly stop running. This list used to stop at
+# "install Brewfile packages", which is why nothing caught the runner feeding
+# the manifest in on stdin: `brew bundle` ate the remainder, "wire docker CLI
+# plugins" never ran, and the run still reported success.
+# A skipped step still logs "==> <name> (skipped, ...)", so this matches either
+# way; that a step did the right thing is asserted further down, per step.
+while IFS= read -r step; do
   assert_file_has "ran step: $step" "$out" "==> ${step//[\[\]().*+?^$\\]/.}"
-done
+done < <(python3 -c '
+import json, sys
+for s in json.load(open(sys.argv[1])):
+    print(s["name"])
+' "$REPO/bootstrap-steps.json")
 
 section "transcript"
 log_file="$(find "$HOME/.local/state/dotfiles" -name 'setup-*.log' -type f 2>/dev/null | head -1)"

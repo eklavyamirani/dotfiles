@@ -186,12 +186,15 @@ origin_head() { git -C "$ORIGINS/$1" rev-parse HEAD; }
 
 # Runs the real bootstrap.sh with a clean environment, capturing its transcript.
 # Returns bootstrap's exit status; the combined output is left in $BOOTSTRAP_OUT.
-run_bootstrap() {
+# An argument is passed through as bootstrap's manifest path, which is how the
+# step-contract scenario drives the real runner over throwaway manifests
+# instead of the shipping one.
+run_bootstrap() { # [manifest path]
   _RUN_SEQ=$((${_RUN_SEQ:-0} + 1))
   BOOTSTRAP_OUT="$SANDBOX/bootstrap-$_RUN_SEQ.out"
   local status=0
   ( cd "$REPO" && env -u HOMEBREW_PREFIX -u HOMEBREW_CELLAR -u HOMEBREW_REPOSITORY \
-      PATH="$SANDBOX/guardbin:$PATH" ./bootstrap.sh ) \
+      PATH="$SANDBOX/guardbin:$PATH" ./bootstrap.sh "$@" ) \
     >"$BOOTSTRAP_OUT" 2>&1 || status=$?
   printf '   (bootstrap exit %s, output: %s)\n' "$status" "$BOOTSTRAP_OUT"
   return "$status"
@@ -275,6 +278,30 @@ home_link_snapshot() {
     done | sort
 }
 
+# One "<type> <path relative to $REPO>" line per entry, sorted. The type marker
+# matches what GNU find's `%y` produced here before: l/d/f, symlinks reported as
+# links rather than as whatever they point at.
+#
+# `-printf` is GNU-only -- the same reason home_link_snapshot() above spells its
+# output out by hand. macOS find rejects it outright ("unknown primary or
+# operator"), so on the macOS runner this used to yield an empty string, and the
+# callers, which only ever compare one snapshot against another, compared "" to
+# "" and passed without checking anything.
+#
+# Deliberately not `2>/dev/null`: swallowing find's stderr is what let that
+# failure look like a clean tree for as long as it did. If find cannot read the
+# tree, the scenario should say so.
 repo_tree_snapshot() {
-  find "$REPO" -path "$REPO/.git" -prune -o -printf '%y %P\n' 2>/dev/null | sort
+  find "$REPO" -path "$REPO/.git" -prune -o -print |
+    while IFS= read -r path; do
+      rel="${path#"$REPO"}"
+      rel="${rel#/}"
+      # -L first: a symlink to a directory answers yes to -d as well.
+      if   [ -L "$path" ]; then type=l
+      elif [ -d "$path" ]; then type=d
+      elif [ -f "$path" ]; then type=f
+      else                      type=?
+      fi
+      printf '%s %s\n' "$type" "$rel"
+    done | sort
 }

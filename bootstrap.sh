@@ -20,14 +20,33 @@
 #                          (not a subshell), so exports/PATH changes (e.g.
 #                          the Homebrew shellenv step) persist to later
 #                          steps, the way sourcing would in an interactive
-#                          shell.
-#   skip_if  (optional) -- a shell condition string; if it exits 0, the
-#                          step is skipped (e.g. "already installed" checks)
+#                          shell. The corollary: a command must not call
+#                          `exit` itself -- that would terminate this runner
+#                          rather than fail its step. Steps are external
+#                          programs; wrap anything else in `sh -c`.
+#   skip_if  (optional) -- a shell condition string meaning "this step has no
+#                          work to do"; if it exits 0, the step is skipped.
+#   state    (optional) -- a shell condition string describing the state the
+#                          step exists to produce. Checked TWICE: before the
+#                          command (holds => skip, nothing to do) and again
+#                          after it, but only if the command reported failure.
+#                          If the state holds then, the step is treated as a
+#                          success with a WARNING, because the command's exit
+#                          code and the outcome are not the same question --
+#                          see the failure-handling note below.
 #   purpose  (optional) -- human-readable note, shown in logs
 #
 # Failure handling: steps are sequentially dependent (stow-ing before
 # Homebrew/mise exist, or syncing repos before PATH includes
 # ~/.local/bin, is meaningless), so this HALTS on the first failing step.
+# "Failing" means the declared `state` was not reached -- falling back to a
+# non-zero exit code only for steps that declare no state. The distinction is
+# not pedantic: `brew install` exits 1 when a formula's post-install hook
+# flakes, having installed everything it was asked for, and Homebrew has a
+# single failure code (`exit Homebrew.failed? ? 1 : 0`) shared with a genuinely
+# missing formula. Keying success off the exit code alone once halted a
+# bootstrap after a 92-minute build over a cert symlink that had nothing to do
+# with what the step was for.
 # Every step's full output is captured to a transcript log file regardless
 # of outcome, so a failure always leaves complete detail to diagnose nothing
 # is reverted or cleaned up automatically. Every step here is idempotent
@@ -72,8 +91,9 @@ for step in steps:
     name = step["name"]
     command = step["command"]
     skip_if = step.get("skip_if") or ""
+    state = step.get("state") or ""
     purpose = step.get("purpose") or ""
-    print("\x1f".join([name, command, skip_if, purpose]))
+    print("\x1f".join([name, command, skip_if, state, purpose]))
 ' "$MANIFEST" 2>&1); then
   fail "could not parse manifest (invalid JSON?): $MANIFEST"
   printf '%s\n' "$parsed" >&2
@@ -82,12 +102,28 @@ fi
 
 log "bootstrap started, transcript: $LOG_FILE"
 
-while IFS=$'\x1f' read -r name command skip_if purpose; do
+# The manifest is fed in on fd 3, not stdin. A step's command inherits this
+# process's stdin, and any command that reads it -- `brew bundle` does -- would
+# otherwise consume the rest of the manifest from the here-string, so the loop
+# would end early and report "bootstrap complete" having silently skipped every
+# remaining step. That is exactly how the `wire docker CLI plugins` step went
+# missing while the run still exited 0. Keeping the steps on their own
+# descriptor also leaves stdin free for a step that legitimately needs to prompt.
+while IFS=$'\x1f' read -r name command skip_if state purpose <&3; do
   [ -z "$name" ] && continue
 
+  # Either predicate holding up front means there is nothing to do. They are
+  # checked together here but mean different things: skip_if is "this step has
+  # no work", state is "the outcome this step exists to produce is already
+  # true".
   if [ -n "$skip_if" ] && eval "$skip_if" >/dev/null 2>&1; then
-    log "==> $name (skipped, already done)"
-    log "    command: $command"
+    log "==> $name (skipped, nothing to do)"
+    log "    skip_if: $skip_if"
+    continue
+  fi
+  if [ -n "$state" ] && eval "$state" >/dev/null 2>&1; then
+    log "==> $name (skipped, already in the declared state)"
+    log "    state: $state"
     continue
   fi
 
@@ -95,13 +131,34 @@ while IFS=$'\x1f' read -r name command skip_if purpose; do
   [ -n "$purpose" ] && log "    purpose: $purpose"
   log "    command: $command"
   start=$(date +%s)
-  if eval "$command"; then
-    end=$(date +%s)
+  status=0
+  eval "$command" || status=$?
+  end=$(date +%s)
+
+  if [ "$status" -eq 0 ]; then
     log "    done ($((end - start))s)"
-  else
-    fail "step failed: $name -- see full transcript at $LOG_FILE"
-    exit 1
+    continue
   fi
-done <<< "$parsed"
+
+  # The command reported failure. That is not the same question as "did this
+  # step achieve what it exists for", and for some tools it is not even
+  # correlated: `brew install` exits 1 when a formula's post-install hook
+  # flakes, having installed everything asked of it. Homebrew has exactly one
+  # failure code (brew.rb: `exit Homebrew.failed? ? 1 : 0`), so the exit status
+  # cannot distinguish that from a genuinely missing formula -- only the
+  # resulting state can. When a step declares that state and it now holds, the
+  # step succeeded; say so loudly and carry on rather than halting a
+  # multi-hour bootstrap over a cosmetic symlink.
+  if [ -n "$state" ] && eval "$state" >/dev/null 2>&1; then
+    log "    WARNING: command exited $status, but the declared state was reached"
+    log "    state: $state"
+    log "    treating as success -- review the transcript above if this is unexpected"
+    log "    done ($((end - start))s, with warnings)"
+    continue
+  fi
+
+  fail "step failed: $name (exit $status) -- see full transcript at $LOG_FILE"
+  exit 1
+done 3<<< "$parsed"
 
 log "bootstrap complete, transcript saved at $LOG_FILE"

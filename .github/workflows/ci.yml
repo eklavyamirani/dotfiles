@@ -21,6 +21,9 @@ jobs:
           - 01-fresh-apply
           # 2. re-apply of new changes onto an existing configuration
           - 02-reapply
+          # 3. the runner's step contract: skip, halt, and the exit-code-vs-state
+          #    distinction, driven over throwaway manifests
+          - 03-step-contract
     steps:
       - uses: actions/checkout@v7
 
@@ -51,6 +54,7 @@ jobs:
         scenario:
           - 01-fresh-apply
           - 02-reapply
+          - 03-step-contract
     steps:
       - uses: actions/checkout@v7
 
