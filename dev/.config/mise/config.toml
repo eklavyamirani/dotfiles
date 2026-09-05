@@ -30,7 +30,7 @@
 # pinned here briefly and removed for exactly that reason.
 
 [tools]
-# ---- CLI tools (moved off Homebrew; see issue #4) ----
+# ---- CLI tools and Language runtimes (moved off Homebrew; see issue #4) ----
 github-cli   = "2.99.0"   # gh
 fzf          = "0.74.3"
 ripgrep      = "15.2.0"   # rg
@@ -41,7 +41,7 @@ colima       = "0.10.3"
 docker-cli   = "29.7.2"   # the `docker` client only -- plugins stay in Brewfile
 codex        = "0.153.4"
 
-# ---- Language runtimes ----
 python       = "3.12.14"
 claude-code = "2.1.260"
 copilot-cli = "1.0.82"
+lima = "2.2.0"
