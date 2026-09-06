@@ -1,8 +1,9 @@
 # dotfiles
 
 Stow-based dotfiles for **`dev/`** — an isolated, non-admin macOS account
-that owns all development tooling (Homebrew installed to `~/.homebrew`, no
-sudo required; mise; neovim; pi/llama-server configs). The paired
+that owns all development tooling (CLI tools and
+runtimes pinned with mise; an isolated Homebrew in `~/.homebrew`, no sudo
+required; neovim; pi/llama-server configs). The paired
 main/admin account is deliberately minimal and its profile is kept only as
 a frozen snapshot in `archive/admin/` (see its README) until it moves to
 its own repository.
@@ -49,7 +50,7 @@ shouldn't need touching. Each step entry has:
 {
   "name": "install Homebrew into ~/.homebrew",
   "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
-  "skip_if": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
+  "state": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
   "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local"
 }
 ```
@@ -58,21 +59,119 @@ shouldn't need touching. Each step entry has:
   `eval` **in the same process** (not a subshell), so `export`/`PATH`
   changes from one step (e.g. loading Homebrew's `shellenv`) persist to
   later steps, the way sourcing would in an interactive shell.
-- `skip_if` -- optional shell condition; if it exits `0`, the step is
-  skipped (e.g. "already installed" checks).
+- `state` -- optional shell condition describing **the state the step
+  exists to produce**. Checked twice: before the command (holds -> skip,
+  the work is already done) and again after it if the command reported
+  failure.
+- `skip_if` -- optional shell condition meaning **this step has no work to
+  do**, which is not the same claim as `state` (the `mise install` step
+  has nothing to do when no mise config was stowed, but "no config" is not
+  the outcome that step exists to produce). If it exits `0`, the step is
+  skipped.
 - `purpose` -- optional, shown in logs.
 
 It halts immediately on the first failing step (later steps depend on
 earlier ones succeeding), and writes a full transcript of every step's
 output to `~/.local/state/dotfiles/setup-<timestamp>.log` regardless of
 outcome, so a failure always leaves you with complete detail to diagnose.
-Every step is
-idempotent (or guarded by `skip_if`), so it's always safe to fix the issue and rerun.
+Every step is idempotent (or guarded by `skip_if`/`state`), so it's always
+safe to fix the issue and rerun.
+
+**A step fails when its declared `state` was not reached** -- the exit code
+is the fallback, used only for steps that declare no state. A command that
+exits non-zero but leaves the declared state satisfied is logged as
+`WARNING: command exited N, but the declared state was reached` and the run
+continues. This is not leniency for its own sake: `brew install` exits `1`
+when a formula's post-install hook flakes even though every requested
+formula installed, and Homebrew has a single failure exit code
+(`exit Homebrew.failed? ? 1 : 0`) shared with a genuinely missing formula.
+No exit code can separate those two; only the resulting state can. Keying
+success off the exit status alone once halted a bootstrap after a 92-minute
+`mise` build over a cert symlink unrelated to the step's purpose. The
+`WARNING` keeps the discrepancy visible rather than swallowing it, and a
+step that fails *without* reaching its state still halts the run as before.
 
 This account's Homebrew never touches `/opt/homebrew` or `/usr/local` and
 never requires an admin password. A startup tripwire in
 `dev/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
 compromised (e.g. another account's Homebrew leaks onto `PATH`).
+
+### What pins what: mise for tools, Homebrew for the rest
+
+Tooling is split between two manifests, and the split is not stylistic:
+
+| Manifest | Owns | Pinned? | Rollback? |
+| --- | --- | --- | --- |
+| `dev/.config/mise/config.toml` | CLI tools + language runtimes | yes, exact versions | yes |
+| `dev/Brewfile` | bootstrap deps, formulae with no mise backend, docker CLI plugins, casks | no | no |
+
+Homebrew was the default here and cannot be made reproducible. Upstream is
+explicit that `brew bundle` "does not and will not have a concept of a
+`Brewfile` lock file"
+([Brew-Bundle-and-Brewfile.md](https://docs.brew.sh/Brew-Bundle-and-Brewfile)),
+there is no `brew rollback`, and the alternatives in
+[Versions.md](https://docs.brew.sh/Versions) each disclaim themselves:
+`brew pin` blocks dependent upgrades and stops security updates,
+`HOMEBREW_NO_AUTO_UPDATE` does not stop `brew upgrade`, and `brew extract`
+makes you the maintainer of a formula in your own tap. On top of that, this
+account installs Homebrew to `~/.homebrew`, and the default prefix "is
+required for most bottles (binary packages) to be used"
+([Installation.md](https://docs.brew.sh/Installation)) — so most formulae
+here were compiled from source on every fresh machine.
+
+mise has none of those problems: exact versions in a tracked file, prebuilt
+binaries from its aqua/ubi backends, side-by-side installs, no sudo. So
+everything mise has a backend for moved (see
+[#4](https://github.com/eklavyamirani/dotfiles/issues/4)):
+`gh`, `fzf`, `ripgrep`, `tmux`, `neovim`, `tree-sitter`, `colima`, `docker`
+and `python`.
+
+#### Rolling back a tool
+
+Side-by-side installs make this an edit, not a repair:
+
+```bash
+$EDITOR dev/.config/mise/config.toml   # neovim = "0.12.5" -> "0.12.4"
+mise install                           # or ./reapply.sh
+git commit -am 'pin neovim 0.12.4'
+```
+
+The version you rolled off stays on disk under
+`~/.local/share/mise/installs/<tool>/<version>`, so rolling forward again is
+instant and offline. Nothing is deduplicated, though — each version is a
+full copy. `mise prune` reclaims versions no config references if disk gets
+tight.
+
+To bump a pin, `mise use -g <tool>@<version>` and commit the resulting diff.
+Never write `latest` or a `~>` range in that file: an inexact pin is the
+behaviour this split exists to eliminate.
+
+#### What is still unpinned
+
+Being honest about the remaining surface, since a table that quietly
+overclaims is worse than no table:
+
+- **`mise` itself.** It is installed by `brew install mise`, which gives
+  whatever is current — the bootstrapper cannot bootstrap itself. Accepted
+  rather than solved: mise's version does not determine the tool versions
+  it installs, so a drifting mise still converges the account to the pins
+  in `config.toml`.
+- **`git`, `tree`, `hf`, `audio-cpp`** — no mise backend exists (checked
+  against mise's registry), so they stay unpinned Homebrew formulae.
+- **`docker-buildx`, `docker-compose`** — docker CLI *plugins*, resolved
+  from `~/.docker/cli-plugins` rather than `PATH`, wired there from the
+  Homebrew prefix by `dev/.local/bin/link-docker-cli-plugins`. `buildx` has
+  no mise backend; `docker-compose` does, but moving it alone would break
+  `docker compose` unless that script learned a second source directory.
+- **Casks.** `brew bundle` is the only thing here that manages `.app`
+  bundles at all.
+- **External repos.** `sync-external-repos` tracks branch tips with no
+  commit pinning (see below) — a separate, still-open gap.
+
+`dev/.zprofile.d/55-mise.zsh` activates mise after Homebrew (so pinned tools
+win over a same-named formula), appends mise's shims directory as a fallback
+for processes that never source `.zprofile`, and carries its own tripwire
+warning if a pinned tool resolves outside `$HOME`.
 
 ### `dev-shell` from the admin account
 
@@ -141,7 +240,7 @@ and the exit code is non-zero if anything failed.
 
 `.gitignore` ignores all of `dev/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
-`terminal/`, `llama-server/`, `external-repos.json`). This is deliberate:
+`terminal/`, `llama-server/`, `mise/config.toml`, `external-repos.json`). This is deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one

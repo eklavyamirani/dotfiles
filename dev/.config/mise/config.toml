@@ -1,23 +1,48 @@
-# Global runtime versions for the isolated dev account.
+# Pinned CLI tools and language runtimes for the isolated dev account.
 #
-# mise -- not Homebrew -- owns language runtimes here. Homebrew's formulae
-# track a single moving version and upgrade underneath you on any `brew
-# bundle`; pinned entries below are reproducible and per-project overridable
-# by a repo-local .mise.toml.
+# mise -- not Homebrew -- owns everything it has a backend for. Homebrew
+# cannot pin: upstream is explicit that `brew bundle` "does not and will
+# not have a concept of a Brewfile lock file" (docs/Brew-Bundle-and-Brewfile.md),
+# there is no `brew rollback`, and because this account's Homebrew lives in
+# ~/.homebrew rather than the default prefix, most formulae are built from
+# source ("the default prefix ... is required for most bottles to be used",
+# docs/Installation.md). mise fixes all three: exact versions tracked here,
+# prebuilt binaries via its aqua/ubi backends, and side-by-side installs
+# under ~/.local/share/mise/installs, so a rollback is an edit to a version
+# string plus `mise install`.
 #
-# Activated by dev/.zprofile.d/55-mise.zsh. Applied by `./reapply.sh`,
-# which runs `mise install` so a clone converges to exactly these versions.
+# Activated by dev/.zprofile.d/55-mise.zsh. Applied by `./reapply.sh` and by
+# bootstrap's "install pinned tools (mise)" step, so a clone converges to
+# exactly these versions.
 #
 # Versions are pinned exactly, on purpose: "3.12" would silently drift to
-# whatever the latest 3.12.x is, which is the behaviour we just left brew for.
-# Bump deliberately with `mise use -g python@<new>` and commit the result.
+# whatever the latest 3.12.x is, which is the behaviour we just left brew
+# for. No "latest", no "~>" ranges. Bump deliberately with
+# `mise use -g <tool>@<version>` and commit the result.
 #
-# Keep this list to runtimes that are genuinely global. A runtime used by a
-# single project belongs in that project's own .mise.toml (`mise use
-# dotnet@10.0.400` inside the repo), so the version travels with the code
-# that needs it instead of being an account-wide fact. dotnet was pinned
-# here briefly and removed for exactly that reason -- no dotnet project
-# exists on this machine yet.
+# What is NOT here, and why, is documented in dev/Brewfile -- tools with no
+# mise backend, and the two docker CLI plugins, stay with Homebrew.
+#
+# Keep runtimes in this file to ones that are genuinely global. A runtime
+# used by a single project belongs in that project's own .mise.toml
+# (`mise use dotnet@10.0.400` inside the repo), so the version travels with
+# the code that needs it instead of being an account-wide fact. dotnet was
+# pinned here briefly and removed for exactly that reason.
 
 [tools]
-python = "3.12.14"
+# ---- CLI tools and Language runtimes (moved off Homebrew; see issue #4) ----
+github-cli   = "2.99.0"   # gh
+fzf          = "0.74.3"
+ripgrep      = "15.2.0"   # rg
+tmux         = "3.7c"
+neovim       = "0.12.5"   # nvim
+tree-sitter  = "0.27.0"   # the CLI; :TSInstall compiles grammars with it
+colima       = "0.10.3"
+docker-cli   = "29.7.2"   # the `docker` client only -- plugins stay in Brewfile
+codex        = "0.153.4"
+
+python       = "3.12.14"
+claude-code = "2.1.260"
+copilot-cli = "1.0.82"
+lima = "2.2.0"
+herdr = "0.8.2"

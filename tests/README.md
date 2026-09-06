@@ -63,8 +63,9 @@ that bootstrap asks Homebrew for exactly the right things (`install stow mise`,
 `bundle --file=<repo>/dev/Brewfile`, every non-commented `Brewfile` entry) and
 that it does so against `~/.homebrew`, and — for `reapply.sh` — that drift is
 computed from what the stub records as installed versus what the Brewfile
-declares. `mise` is a no-op shim, so the tests assert that `mise install` is
-invoked, not that a runtime is downloaded. macOS-only behaviour
+declares. `mise` is a no-op shim, so the tests assert that `mise install` is invoked and
+that the two manifests never claim the same tool, not that anything is
+downloaded. macOS-only behaviour
 (`60-terminal-appearance.zsh`'s Terminal.app import, `.macos` defaults) is not
 covered — it no-ops off macOS.
 

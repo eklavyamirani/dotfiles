@@ -37,17 +37,21 @@ out="$SANDBOX/fresh.out"
 
 assert_file_has "reports completion" "$out" 'bootstrap complete'
 assert_file_lacks "no step failed" "$out" 'ERROR: step failed'
-for step in \
-  'install Homebrew into ~/.homebrew' \
-  'load Homebrew into this shell' \
-  'install stow and mise' \
-  'prepare stow target directories' \
-  'stow dev profile' \
-  'sync external repos' \
-  'install Brewfile packages'
-do
+# Derived from the manifest rather than listed here, so a step added to
+# bootstrap-steps.json is covered without editing this file -- and, more to the
+# point, so the LAST step cannot quietly stop running. This list used to stop at
+# "install Brewfile packages", which is why nothing caught the runner feeding
+# the manifest in on stdin: `brew bundle` ate the remainder, "wire docker CLI
+# plugins" never ran, and the run still reported success.
+# A skipped step still logs "==> <name> (skipped, ...)", so this matches either
+# way; that a step did the right thing is asserted further down, per step.
+while IFS= read -r step; do
   assert_file_has "ran step: $step" "$out" "==> ${step//[\[\]().*+?^$\\]/.}"
-done
+done < <(python3 -c '
+import json, sys
+for s in json.load(open(sys.argv[1])):
+    print(s["name"])
+' "$REPO/bootstrap-steps.json")
 
 section "transcript"
 log_file="$(find "$HOME/.local/state/dotfiles" -name 'setup-*.log' -type f 2>/dev/null | head -1)"
@@ -76,6 +80,47 @@ while read -r pkg; do
   assert_file_has "Brewfile entry installed: $pkg" "$HOME/.homebrew/bundled.txt" "^${pkg}$"
 done < <(sed -e 's/#.*$//' "$REPO/dev/Brewfile" | sed -n -E 's/^[[:space:]]*brew[[:space:]]+"([^"]+)".*/\1/p')
 assert_file_lacks "commented-out casks were not installed" "$HOME/.homebrew/bundled.txt" '^(visual-studio-code|obsidian)$'
+
+section "pinned tools: mise owns them, and owns them exclusively"
+# The mise config is stowed like any other managed file (asserted below with
+# the rest of the package); what matters here is that bootstrap asked mise to
+# reconcile it, and that the two manifests do not both claim the same tool --
+# a formula and a pin of the same name would race for PATH.
+assert_file_has "mise was asked to install the pinned tools" "$BREW_SHIM_LOG" '^mise install$'
+assert_true "the mise config was linked before mise ran" test -f "$HOME/.config/mise/config.toml"
+
+MISE_CONFIG="$REPO/dev/.config/mise/config.toml"
+# Tool names as declared, one per line (comments and the [tools] header out).
+mise_tools() {
+  sed -e 's/#.*$//' "$MISE_CONFIG" |
+    sed -n -E 's/^[[:space:]]*([A-Za-z0-9_.-]+)[[:space:]]*=[[:space:]]*"([^"]+)".*/\1 \2/p'
+}
+# Homebrew formula name for a mise tool, where they differ.
+brew_name_for() {
+  case "$1" in
+    github-cli) printf 'gh\n' ;;
+    docker-cli) printf 'docker\n' ;;
+    *)          printf '%s\n' "$1" ;;
+  esac
+}
+while read -r tool version; do
+  [ -n "$tool" ] || continue
+  # Exact versions only: "latest", "lts", "3.12" or "~> 1.2" would reintroduce
+  # exactly the drift this split exists to remove.
+  assert_true "pinned exactly: $tool = $version" \
+    bash -c 'printf %s "$1" | grep -Eq "^[0-9]+\.[0-9]+(\.[0-9]+)?[A-Za-z0-9.+-]*$"' _ "$version"
+  brewname="$(brew_name_for "$tool")"
+  assert_file_lacks "not also declared in the Brewfile: $brewname" \
+    "$REPO/dev/Brewfile" "^[[:space:]]*brew[[:space:]]+\"$brewname\""
+  assert_file_lacks "not installed by brew either: $brewname" \
+    "$HOME/.homebrew/bundled.txt" "^${brewname}$"
+done < <(mise_tools)
+
+# The Brewfile has a job left, and it is not CLI tools: the bootstrap pair,
+# what mise has no backend for, the docker plugins, and casks.
+assert_file_has "Brewfile still declares the bootstrap pair" "$REPO/dev/Brewfile" '^brew "stow"$'
+assert_file_has "Brewfile still declares mise itself" "$REPO/dev/Brewfile" '^brew "mise"$'
+assert_file_has "docker CLI plugins stay with Homebrew" "$REPO/dev/Brewfile" '^brew "docker-buildx"$'
 
 section "every managed file is linked back to the repository"
 while read -r rel; do
