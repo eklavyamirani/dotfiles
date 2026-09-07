@@ -2,7 +2,7 @@
 
 Frozen snapshot of the stow package for the main/admin macOS account. It is
 kept here for reference only until it moves to its own repository; nothing
-in `dev/`, `bootstrap.sh`, or `bootstrap-steps.json` depends on it.
+in `packages/`, `bootstrap.sh`, or the manifests depends on it.
 
 The admin account is intentionally minimal: no Homebrew, no language
 runtimes, no dev tooling. Just `.zshrc`, `.zprofile` (with the `dev-shell`

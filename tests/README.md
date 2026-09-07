@@ -19,6 +19,8 @@ will reach for, and the scenarios branch on it:
 | | macOS (`apply-macos` job) | Linux (container `apply` job) |
 | --- | --- | --- |
 | Stub | `stubs/homebrew/bin/brew` | `stubs/nix/bin/nix` |
+| Packages deployed | `common unix macos` | `common unix linux` |
+| Package refused | `linux` | `macos` |
 | Call log | `$BREW_CALL_LOG` | `$NIX_CALL_LOG` |
 | Drift model | Brewfile vs installed, `--prune` | flake package list vs the linked store path |
 
@@ -60,7 +62,7 @@ Each scenario builds a self-contained world:
   assert the deploy never writes back into it.
 - **Remotes are local.** `git config --global url.<file://…>.insteadOf` rewrites
   `https://github.com/Homebrew/brew` and the external-repo URLs to git repos in
-  the sandbox. Nothing is edited in `bootstrap-steps.json` or
+  the sandbox. Nothing is edited in `manifests/common/bootstrap-steps.json` or
   `external-repos.json` — the manifests under test ship exactly as they run in
   CI, and the suite passes with `--network none`.
 - **Homebrew is stubbed** (`stubs/homebrew/bin/brew`, cloned in place of the
@@ -70,7 +72,7 @@ Each scenario builds a self-contained world:
   one, so `stow` is the real `stow`), and **fails hard if its prefix is ever
   outside `$HOME`** — the isolation invariant is an assertion, not a comment.
 - **Nix is stubbed** (`stubs/nix/bin/nix`). It derives a fake store path from
-  the package list in `nix/flake.nix`, so the same list yields the same path
+  the package list in `manifests/linux/flake.nix`, so the same list yields the same path
   and any edit yields a different one — which is what makes `reapply.sh`'s
   drift comparison testable from the real manifest rather than from a
   hardcoded answer. `build --out-link` creates the symlink-into-the-store
@@ -90,7 +92,7 @@ Each scenario builds a self-contained world:
 
 Real: `bootstrap.sh`'s step runner, ordering, `skip_if` handling and halt-on-
 failure; `reapply.sh`'s plan/prune/backup logic and its failsafes;
-`bootstrap-steps.json`; `prepare-stow-targets.sh`; `stow`;
+`manifests/common/bootstrap-steps.json`; `prepare-stow-targets.sh`; `stow`;
 `sync-external-repos` with real `git clone` / `git pull --ff-only`; the deployed
 `.zprofile` chain loaded by real `zsh`; the `Brewfile` parsed into the package
 list bootstrap asks Homebrew for; `link-docker-cli-plugins`.
@@ -102,11 +104,11 @@ Linux; a real `nix build` would fetch a nixpkgs revision and its whole closure
 from `cache.nixos.org`, which `--network none` forbids outright. Both are slow
 and flaky enough to make the signal worse, not better. What the tests do assert is
 that bootstrap asks Homebrew for exactly the right things (`install stow mise`,
-`bundle --file=<repo>/dev/Brewfile`, every non-commented `Brewfile` entry) and
+`bundle --file=<repo>/manifests/macos/Brewfile`, every non-commented `Brewfile` entry) and
 that it does so against `~/.homebrew`, and — for `reapply.sh` — that drift is
 computed from what the stub records as installed versus what the Brewfile
 declares. On Linux the equivalent assertions are that `nix build` was pointed at
-`nix/flake.nix` and the expected out-link, that `--extra-experimental-features`
+`manifests/linux/flake.nix` and the expected out-link, that `--extra-experimental-features`
 was passed on the command line (the stowed `nix.conf` does not exist yet at
 that point in a fresh apply), and that every package the flake declares came
 out in the built environment.
@@ -126,8 +128,11 @@ Homebrew snippet; the container covers the Nix one.
 
 ## Adding to them
 
-The file-level assertions walk `dev/` and derive what stow should deploy, so a
+The file-level assertions walk the package set this platform deploys
+(`packages/{common,unix,<platform>}`) and derive what stow should link, so a
 new managed file or directory is covered automatically — no test edit needed.
+They also walk the *other* platform's package and assert every file in it is
+absent, which is what catches a foreign package leaking into `$HOME`.
 A new `scenarios/NN-name.sh` (source `lib/harness.sh`, call `sandbox_create`,
 `trap sandbox_destroy EXIT`, end with `finish`) is picked up by
 `run-tests.sh` automatically; add it to the matrix in

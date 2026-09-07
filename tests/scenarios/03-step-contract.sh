@@ -169,7 +169,7 @@ section "a step declaring another OS is skipped, and one declaring this OS runs"
 # checked ahead of skip_if and state on purpose: a step for the other platform
 # may have predicates that cannot even be evaluated here (`brew shellenv` on
 # Linux), so the gate has to come first rather than fall out of a failing test.
-if [ "$PLATFORM" = darwin ]; then other_os=linux; else other_os=darwin; fi
+if [ "$PLATFORM" = macos ]; then other_os=linux; else other_os=macos; fi
 rm -f "$MARKER" "$MARKER.other"
 os_manifest="$(manifest os-gate <<JSON
 [
@@ -217,8 +217,8 @@ for step in steps:
     assert step.get("command"), step
     extra = set(step) - allowed
     assert not extra, (step["name"], extra)
-    assert step.get("os") in (None, "darwin", "linux"), (step["name"], step.get("os"))
-' "$REPO/bootstrap-steps.json"
+    assert step.get("os") in (None, "macos", "linux"), (step["name"], step.get("os"))
+' "$REPO/manifests/common/bootstrap-steps.json"
 
 # Both platforms must actually be served: a manifest whose every step is gated
 # to one OS would leave the other with nothing but the shared steps, which is
@@ -227,9 +227,9 @@ assert_true "the manifest has steps for both platforms" python3 -c '
 import json, sys
 steps = json.load(open(sys.argv[1]))
 declared = {s.get("os") for s in steps if s.get("os")}
-assert declared == {"darwin", "linux"}, declared
+assert declared == {"macos", "linux"}, declared
 shared = [s["name"] for s in steps if not s.get("os")]
 assert shared, "no OS-independent steps left"
-' "$REPO/bootstrap-steps.json"
+' "$REPO/manifests/common/bootstrap-steps.json"
 
 finish

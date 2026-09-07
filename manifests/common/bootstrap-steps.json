@@ -1,0 +1,91 @@
+[
+  {
+    "name": "install Homebrew into ~/.homebrew",
+    "os": "macos",
+    "command": "git clone https://github.com/Homebrew/brew \"$HOME/.homebrew\"",
+    "state": "[ -x \"$HOME/.homebrew/bin/brew\" ]",
+    "purpose": "Isolated Homebrew -- never /opt/homebrew or /usr/local, no sudo required"
+  },
+  {
+    "name": "load Homebrew into this shell",
+    "os": "macos",
+    "command": "eval \"$(\"$HOME/.homebrew/bin/brew\" shellenv)\"",
+    "purpose": "Puts brew on PATH for every step below (stow, mise, brew bundle)"
+  },
+  {
+    "name": "install stow and mise",
+    "os": "macos",
+    "command": "brew install stow mise",
+    "state": "[ -x \"$HOME/.homebrew/bin/stow\" ] && [ -x \"$HOME/.homebrew/bin/mise\" ]",
+    "purpose": "Bootstrap dependencies -- everything else is pinned by mise. Declares its state because `brew install` exits 1 when any formula's post-install hook flakes (a cosmetic cert symlink, say) even though every requested formula installed; Homebrew has one failure code for that and for a genuinely missing formula, so only the resulting state can tell them apart. The state names the isolated prefix rather than asking PATH: a `stow` belonging to another account's Homebrew must not count as this step having succeeded"
+  },
+  {
+    "name": "install Nix (single-user)",
+    "os": "linux",
+    "command": "sh -c 'curl -fsSL https://nixos.org/nix/install | sh -s -- --no-daemon --yes --no-channel-add --no-modify-profile'",
+    "state": "[ -e \"$HOME/.nix-profile/etc/profile.d/nix.sh\" ]",
+    "purpose": "Linux's counterpart to the isolated Homebrew above. Single-user: /nix is created once with sudo and then owned outright by this account, so every package operation afterwards is unprivileged. --no-channel-add because the package set comes from the flake, not from a channel; --no-modify-profile because ~/.zshrc is a stow symlink into this repository and the installer would otherwise append its snippet straight into the tracked file -- packages/linux/.zprofile.d/45-nix.zsh sources nix.sh instead"
+  },
+  {
+    "name": "load Nix into this shell",
+    "os": "linux",
+    "command": ". \"$HOME/.nix-profile/etc/profile.d/nix.sh\"",
+    "purpose": "Puts nix on PATH (and NIX_SSL_CERT_FILE in the environment) for the build step below. The counterpart to `brew shellenv` on macOS"
+  },
+  {
+    "name": "build the pinned Nix environment",
+    "os": "linux",
+    "command": "mkdir -p \"$HOME/.local/state/dotfiles\" && nix --extra-experimental-features \"nix-command flakes\" build --out-link \"$HOME/.local/state/dotfiles/nix-env\" \"path:$REPO_DIR/manifests/linux#default\"",
+    "purpose": "Realises manifests/linux/flake.nix -- stow, mise, zsh, git and tree, at the exact nixpkgs revision in flake.lock. --extra-experimental-features on the command line rather than from ~/.config/nix/nix.conf: that file is stowed, and stow has not run yet (it comes from this very build). The out-link doubles as the GC root, so nix-collect-garbage cannot delete the environment out from under a live shell"
+  },
+  {
+    "name": "load the Nix environment into this shell",
+    "os": "linux",
+    "command": "export PATH=\"$HOME/.local/state/dotfiles/nix-env/bin:$PATH\"",
+    "purpose": "Makes stow and mise resolvable for the steps below, the same way the Homebrew shellenv step does on macOS"
+  },
+  {
+    "name": "stow the platform package set",
+    "command": "\"$REPO_DIR/stow-packages.sh\"",
+    "purpose": "Deploys packages/{common,unix,<platform>} into $HOME. Goes through stow-packages.sh rather than calling stow directly so that bootstrap and reapply share one definition of the package set and one guard against deploying another platform's package; that script also creates the real target directories first, so stow links managed files individually instead of folding a stateful directory such as ~/.pi into the repository"
+  },
+  {
+    "name": "sync external repos (e.g. nvim config)",
+    "command": "\"$HOME/.local/bin/sync-external-repos\"",
+    "purpose": ""
+  },
+  {
+    "name": "install pinned tools (mise)",
+    "command": "mise install",
+    "skip_if": "[ ! -f \"$HOME/.config/mise/config.toml\" ]",
+    "purpose": "CLI tools and language runtimes are pinned to exact versions in packages/common/.config/mise/config.toml; neither Homebrew nor a nixpkgs revision pins them per-tool. Must run after the stow step, which links that file into $HOME where mise reads it. Deliberately not OS-gated: the whole point of the split is that both machines get the same tool versions"
+  },
+  {
+    "name": "install Brewfile packages",
+    "os": "macos",
+    "command": "brew bundle --file=\"$REPO_DIR/manifests/macos/Brewfile\"",
+    "purpose": "Only what mise cannot pin: bootstrap deps, formulae with no mise backend, the docker CLI plugins, and casks. Runs after mise so a failure here cannot leave the pinned toolchain uninstalled. Linux's equivalent is manifests/linux/flake.nix, built above"
+  },
+  {
+    "name": "wire docker CLI plugins",
+    "os": "macos",
+    "command": "\"$HOME/.local/bin/link-docker-cli-plugins\"",
+    "purpose": "docker resolves buildx/compose from ~/.docker/cli-plugins, not PATH -- installing the formulae is not enough. macOS only: the plugins are Homebrew formulae, and on Linux docker's own packaging already puts them where the CLI looks"
+  },
+  {
+    "name": "register the pinned zsh as a valid login shell",
+    "os": "linux",
+    "command": "sh -c 'printf \"%s\\n\" \"$HOME/.local/state/dotfiles/nix-env/bin/zsh\" | sudo tee -a /etc/shells >/dev/null'",
+    "skip_if": "! sudo -n true 2>/dev/null || ! [ \"$HOME\" = \"$(getent passwd \"$(id -un)\" | cut -d: -f6)\" ]",
+    "state": "grep -qxF \"$HOME/.local/state/dotfiles/nix-env/bin/zsh\" /etc/shells",
+    "purpose": "chsh refuses a shell that is not listed in /etc/shells. macOS needs no equivalent: zsh is already the default login shell there, which is why this whole pair is Linux-only. Skipped unless $HOME is genuinely this account's home directory: `sudo chsh` acts on the ACCOUNT, not on $HOME, so a run against a throwaway $HOME is NOT sandboxed -- one did exactly that and repointed the real login shell at a path under /tmp, which would have locked the account out of every new shell once that directory was cleaned up"
+  },
+  {
+    "name": "make the pinned zsh this account's login shell",
+    "os": "linux",
+    "command": "sudo chsh -s \"$HOME/.local/state/dotfiles/nix-env/bin/zsh\" \"$(id -un)\"",
+    "skip_if": "! sudo -n true 2>/dev/null || ! [ \"$HOME\" = \"$(getent passwd \"$(id -un)\" | cut -d: -f6)\" ]",
+    "state": "[ \"$(getent passwd \"$(id -un)\" | cut -d: -f7)\" = \"$HOME/.local/state/dotfiles/nix-env/bin/zsh\" ]",
+    "purpose": "Everything this repository configures lives in .zprofile/.zprofile.d/.zshrc, so on a distribution that defaults to bash the entire deployment is inert until the login shell is zsh -- the tools are installed and simply never reach PATH. Run through sudo rather than bare `chsh` so it does not prompt for a password. Note this points the login shell at the Nix out-link: if that link is ever deleted, new shells fail to start -- see the recovery one-liner in the README. Skipped unless $HOME is genuinely this account's home directory: `sudo chsh` acts on the ACCOUNT, not on $HOME, so a run against a throwaway $HOME is NOT sandboxed -- one did exactly that and repointed the real login shell at a path under /tmp, which would have locked the account out of every new shell once that directory was cleaned up"
+  }
+]

@@ -3,7 +3,7 @@
 # which bootstrap.sh would otherwise install through this platform's package
 # manager. Both managers are stubbed (tests/stubs/homebrew, tests/stubs/nix) --
 # see tests/README.md. On Linux the scenarios take the Nix branch of
-# bootstrap-steps.json, so it is the Nix stub that does the work here; the
+# manifests/common/bootstrap-steps.json, so it is the Nix stub that does the work here; the
 # Homebrew stub is exercised by the macOS runner.
 FROM ubuntu:24.04
 

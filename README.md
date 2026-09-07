@@ -1,6 +1,6 @@
 # dotfiles
 
-Stow-based dotfiles for **`dev/`** — an isolated, non-admin macOS account
+Stow-based dotfiles for an isolated, non-admin macOS account
 that owns all development tooling (CLI tools and
 runtimes pinned with mise; an isolated Homebrew in `~/.homebrew`, no sudo
 required; neovim; pi/llama-server configs). The paired
@@ -11,28 +11,49 @@ its own repository.
 The same `./bootstrap.sh` and `./reapply.sh` also deploy this package on
 **Linux**. Only the package-manager layer differs — Nix takes Homebrew's
 place there — and it differs in exactly one place, the `os` field in
-`bootstrap-steps.json`. Everything downstream is shared, so both machines
+`manifests/common/bootstrap-steps.json`. Everything downstream is shared, so both machines
 run the same shell, the same stow package, and the same mise-pinned tool
 versions. See [Linux](#linux-nix-instead-of-homebrew) below.
+
+## Layout
+
+```
+lib/platform.sh                 the only place that calls uname
+packages/  common/              every platform, Windows milestone included
+           unix/                the zsh chain macOS and Linux share
+           macos/  linux/       only what is genuinely platform-specific
+manifests/ common/              bootstrap-steps.json
+           macos/               Brewfile
+           linux/               flake.nix + flake.lock
+```
+
+A file's **package is its platform declaration**. Nothing under `packages/`
+needs an `$OSTYPE` guard, because it never reaches the other machine — which
+is why `stow-packages.sh` refuses to deploy a foreign platform's package: with
+the guards gone, a leaked link is no longer inert, it breaks every login
+shell.
+
+Snippet numbering in `.zprofile.d/` still sorts globally across packages,
+because stow merges them into a single `~/.zprofile.d/`. No reserved ranges
+are needed: two packages picking the same number is harmless, and the only
+ordering that actually matters — the package manager before `55-mise.zsh` — is
+already encoded. The one thing packages must not do is ship the *same
+filename*, which is a stow conflict; the test suite asserts that.
 
 ## Deploy
 
 On the isolated dev account, the normal path is `./bootstrap.sh` (see
 "Bootstrap a new dev account" below). The equivalent manual steps, if you
-already have `stow` and Homebrew:
+already have `stow` and this platform's package manager:
 ```bash
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
-./prepare-stow-targets.sh dev ~
-stow -t ~ dev
+./stow-packages.sh                 # common + unix + this platform
 ~/.local/bin/sync-external-repos   # fetches the Neovim config
 ```
 
-To re-stow after changes (symlinks not set correctly):
-```bash
-./prepare-stow-targets.sh dev ~
-stow -R -t ~ -n -v dev   # dry run, review diffs
-stow -R -t ~ dev         # apply
-```
+`stow-packages.sh` is the single definition of *which* packages get deployed
+and the guard against deploying another platform's; both `bootstrap.sh` and
+`reapply.sh` go through it rather than calling `stow` themselves.
 
 `prepare-stow-targets.sh` creates the package's directory structure in the
 target before Stow runs. This prevents Stow from folding an entire directory
@@ -50,7 +71,7 @@ git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
 `bootstrap.sh` is a generic, declarative step-runner: the actual steps
 (package-manager install, `stow`/`mise` install, `stow`,
 `sync-external-repos`, `brew bundle` or `nix build`) live in
-`bootstrap-steps.json`, not hardcoded in the script.
+`manifests/common/bootstrap-steps.json`, not hardcoded in the script.
 To change what bootstrap does, edit that manifest -- `bootstrap.sh` itself
 shouldn't need touching. Each step entry has:
 
@@ -76,7 +97,7 @@ shouldn't need touching. Each step entry has:
   has nothing to do when no mise config was stowed, but "no config" is not
   the outcome that step exists to produce). If it exits `0`, the step is
   skipped.
-- `os` -- optional, `"darwin"` or `"linux"`. The step runs only on that
+- `os` -- optional, `"macos"` or `"linux"`. The step runs only on that
   platform; elsewhere it is skipped with
   `(skipped, declared for <os>, this is <platform>)`. This is the *only*
   place the two machines diverge, and the gate is checked **before**
@@ -109,7 +130,7 @@ step that fails *without* reaching its state still halts the run as before.
 
 This account's Homebrew never touches `/opt/homebrew` or `/usr/local` and
 never requires an admin password. A startup tripwire in
-`dev/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
+`packages/macos/.zprofile.d/50-homebrew-isolated.zsh` warns if isolation is ever
 compromised (e.g. another account's Homebrew leaks onto `PATH`). That
 snippet is guarded on `$OSTYPE`, so on Linux it is inert rather than
 failing every login shell on a missing `~/.homebrew`.
@@ -122,11 +143,11 @@ only the layer Homebrew occupies on macOS:
 | | macOS | Linux |
 | --- | --- | --- |
 | Package manager | Homebrew in `~/.homebrew` | Nix, single-user |
-| Manifest for what mise can't pin | `dev/Brewfile` | `nix/flake.nix` |
+| Manifest for what mise can't pin | `manifests/macos/Brewfile` | `manifests/linux/flake.nix` |
 | Applied by | `brew bundle` | `nix build` into `~/.local/state/dotfiles/nix-env` |
 | Shell snippet | `50-homebrew-isolated.zsh` | `45-nix.zsh` |
 | Removing a package | delete the line, `./reapply.sh --prune` | delete the line, `./reapply.sh` |
-| CLI tools + runtimes | `dev/.config/mise/config.toml` | same file, same pins |
+| CLI tools + runtimes | `packages/common/.config/mise/config.toml` | same file, same pins |
 | Docker CLI plugins | `link-docker-cli-plugins` | not needed (distro packaging already places them) |
 
 Bootstrap installs Nix **single-user** with
@@ -140,10 +161,23 @@ are load-bearing rather than taste:
   first writable one of `~/.bash_profile`, `~/.profile`, `~/.zshenv`,
   `~/.zshrc` — and `~/.zshrc` is a **stow symlink into this repository**, so
   without that flag the installer would write into the tracked file.
-  `dev/.zprofile.d/45-nix.zsh` sources the profile script instead.
+  `packages/linux/.zprofile.d/45-nix.zsh` sources the profile script instead.
 
 `/nix` is created once with `sudo` by the installer and owned outright by
 your account afterwards.
+
+#### Login vs non-login shells
+
+zsh reads `.zprofile` for **login** shells only. macOS Terminal.app starts one,
+so this is invisible there; most Linux terminal emulators (GNOME Terminal,
+Konsole, …) start a **non-login interactive** shell, which reads only
+`.zshrc`. Left alone, that yields the worst kind of failure: a fully deployed
+machine that behaves as though nothing were installed — no `mise`, no pinned
+tools, no aliases, and no error to explain it.
+
+So `packages/unix/.zshrc` sources `~/.zprofile` when zsh has not already done
+it, guarded by a sentinel `.zprofile` exports so login shells don't do the work
+twice and subshells don't re-run `compinit` and `mise activate`.
 
 #### The login shell
 
@@ -174,7 +208,14 @@ chsh -s "$zsh_path"
 > GRUB recovery mode (`chsh -s /bin/bash <user>`).
 >
 > **Before removing or relocating `~/.local/state/dotfiles`, run
-> `chsh -s /bin/bash` first.** Ordinary `nix-collect-garbage` is safe: the
+> `chsh -s /bin/bash` first.**
+>
+> For the same reason, both steps are skipped unless `$HOME` really is this
+> account's home directory. `sudo chsh` acts on the **account**, not on
+> `$HOME`, so running bootstrap against a throwaway `$HOME` is *not*
+> sandboxed — one such run repointed the real login shell at a path under
+> `/tmp`, which would have locked the account out of every new shell once that
+> directory was cleaned up. Ordinary `nix-collect-garbage` is safe: the
 > out-link is a GC root, which is exactly why `nix build --out-link` is used
 > rather than a bare build.
 
@@ -194,20 +235,28 @@ instead of two. It was not worth it:
   The Linux side is therefore *more* reproducible than the macOS side, not
   less.
 - The environment is rebuilt **whole** on every apply, so deleting a line
-  from `nix/flake.nix` removes the package. There is no Linux equivalent of
+  from `manifests/linux/flake.nix` removes the package. There is no Linux equivalent of
   `--prune`, and no drift to report in the "installed but undeclared"
   direction, because that state cannot persist.
 - The Brewfile's cask and the `audio-cpp` tap are macOS-only anyway, so a
   shared Brewfile would have needed per-OS gating inside it regardless.
 
-`nix/flake.nix` lives at the repository root rather than in `dev/`, because
-stow deploys what is under `dev/` into `$HOME` and the flake is a manifest
-the root scripts *apply*, not a config file that belongs in a home
-directory — the same reason `bootstrap.sh` and `reapply.sh` sit at the root.
+`manifests/linux/flake.nix` lives under `manifests/`, not in a stow package,
+because of the rule that decides which tree anything here belongs in:
+
+> **`manifests/<platform>/` is applied *from* the repository.
+> `packages/<pkg>/` is deployed *into* `$HOME`.**
+
+The Brewfile, the flake and the bootstrap step list are read in place by
+`bootstrap.sh`/`reapply.sh`, so they are manifests. `packages/common/.config/mise/config.toml`
+is the awkward one: conceptually the most "common manifest" in the repo, but
+mise reads it from `~/.config/mise/config.toml`, so it must be stowed and is a
+package. Getting this backwards is how a pointless `~/Brewfile` symlink and a
+stray `~/nix/` directory both appeared.
 
 #### mise comes from `nixos-unstable`, and only mise
 
-`nix/flake.nix` takes `nixpkgs` from `nixos-26.05` but pulls `mise` from
+`manifests/linux/flake.nix` takes `nixpkgs` from `nixos-26.05` but pulls `mise` from
 `nixos-unstable`. Both are pinned by `flake.lock`, so this is not "track the
 newest"; it is a correctness requirement. mise ships its **tool registry**
 (the name → backend mapping) inside the binary, so an mise a few months old
@@ -215,7 +264,7 @@ cannot resolve a tool added to the registry since — and that is a hard
 `mise ERROR <tool> not found in mise tool registry` that halts bootstrap,
 not a cosmetic lag. Stable 26.05 carries mise 2026.5.12, which does not know
 `herdr`; unstable carries 2026.8.6, which does. Since
-`dev/.config/mise/config.toml` is shared with macOS, where Homebrew tracks
+`packages/common/.config/mise/config.toml` is shared with macOS, where Homebrew tracks
 mise's tip, a stale mise here would mean the two machines could not run the
 same manifest at all.
 
@@ -228,9 +277,9 @@ Tooling is split between two manifests, and the split is not stylistic:
 
 | Manifest | Owns | Pinned? | Rollback? |
 | --- | --- | --- | --- |
-| `dev/.config/mise/config.toml` | CLI tools + language runtimes | yes, exact versions | yes |
-| `dev/Brewfile` (macOS) | bootstrap deps, formulae with no mise backend, docker CLI plugins, casks | no | no |
-| `nix/flake.nix` (Linux) | bootstrap deps, packages with no mise backend | yes, via `flake.lock` | yes |
+| `packages/common/.config/mise/config.toml` | CLI tools + language runtimes | yes, exact versions | yes |
+| `manifests/macos/Brewfile` (macOS) | bootstrap deps, formulae with no mise backend, docker CLI plugins, casks | no | no |
+| `manifests/linux/flake.nix` (Linux) | bootstrap deps, packages with no mise backend | yes, via `flake.lock` | yes |
 
 The split is the same on both machines; only the second row changes. mise
 owns every tool it has a backend for either way, so the pinned tool
@@ -262,7 +311,7 @@ and `python`.
 Side-by-side installs make this an edit, not a repair:
 
 ```bash
-$EDITOR dev/.config/mise/config.toml   # neovim = "0.12.5" -> "0.12.4"
+$EDITOR packages/common/.config/mise/config.toml   # neovim = "0.12.5" -> "0.12.4"
 mise install                           # or ./reapply.sh
 git commit -am 'pin neovim 0.12.4'
 ```
@@ -291,11 +340,11 @@ overclaims is worse than no table:
 - **`git`, `tree`, `hf`, `audio-cpp`** — no mise backend exists (checked
   against mise's registry), so on macOS they stay unpinned Homebrew
   formulae. On Linux the ones that apply (`git`, `tree`) are in
-  `nix/flake.nix` and *are* pinned; `hf` and `audio-cpp` are macOS-only
+  `manifests/linux/flake.nix` and *are* pinned; `hf` and `audio-cpp` are macOS-only
   concerns and are simply absent there.
 - **`docker-buildx`, `docker-compose`** — docker CLI *plugins*, resolved
   from `~/.docker/cli-plugins` rather than `PATH`, wired there from the
-  Homebrew prefix by `dev/.local/bin/link-docker-cli-plugins`. `buildx` has
+  Homebrew prefix by `packages/macos/.local/bin/link-docker-cli-plugins`. `buildx` has
   no mise backend; `docker-compose` does, but moving it alone would break
   `docker compose` unless that script learned a second source directory.
   macOS only: both the formulae and the linking step are gated to Darwin,
@@ -306,7 +355,7 @@ overclaims is worse than no table:
 - **External repos.** `sync-external-repos` tracks branch tips with no
   commit pinning (see below) — a separate, still-open gap.
 
-`dev/.zprofile.d/55-mise.zsh` activates mise after whichever package manager
+`packages/unix/.zprofile.d/55-mise.zsh` activates mise after whichever package manager
 supplied it — Homebrew at `50-` on macOS, Nix at `45-` on Linux — so pinned
 tools win over a same-named formula or nixpkgs package, appends mise's shims
 directory as a fallback
@@ -341,7 +390,7 @@ if `copilot` exits non-zero.
 Some tools (currently just the Neovim config) live in their own repos
 instead of being tracked directly in `dotfiles`, so they can be deployed
 standalone on machines that don't want the rest of this repo. These are
-declared in `dev/.config/external-repos.json` (stowed to
+declared in `packages/common/.config/external-repos.json` (stowed to
 `~/.config/external-repos.json`) and synced with `sync-external-repos`
 (stowed to `~/.local/bin/sync-external-repos`, already on `PATH`):
 
@@ -376,17 +425,17 @@ refused, never deleted); a failed pull (e.g. local edits blocking a fast-forward
 completely untouched, never auto-reverted. A summary is printed at the end
 and the exit code is non-zero if anything failed.
 
-### `dev/.config` is allowlisted, not blocklisted
+### `packages/*/.config` is allowlisted, not blocklisted
 
-`.gitignore` ignores all of `dev/.config/*` by default and explicitly
+`.gitignore` ignores all of `packages/*/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
 `terminal/`, `llama-server/`, `mise/config.toml`, `external-repos.json`). This is deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one
 missed entry and a `git add -A` silently commits a secret. To track a new
-tool's config, add explicit `!dev/.config/<tool>/` and
-`!dev/.config/<tool>/**` un-ignore lines to `.gitignore`.
+tool's config, add explicit `!packages/<pkg>/.config/<tool>/` and
+`!packages/<pkg>/.config/<tool>/**` un-ignore lines to `.gitignore`.
 
 ### Local LLM setup (Qwen3.6-27B + pi agent)
 

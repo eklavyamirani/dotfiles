@@ -61,12 +61,12 @@ done < <(python3 -c '
 import json, sys
 for s in json.load(open(sys.argv[1])):
     print(s["name"])
-' "$REPO/bootstrap-steps.json")
+' "$REPO/manifests/common/bootstrap-steps.json")
 
 section "transcript"
 log_file="$(find "$HOME/.local/state/dotfiles" -name 'setup-*.log' -type f 2>/dev/null | head -1)"
 assert_true "transcript written under ~/.local/state/dotfiles" test -n "$log_file"
-[ -n "$log_file" ] && assert_file_has "transcript records the steps" "$log_file" '==> stow dev profile'
+[ -n "$log_file" ] && assert_file_has "transcript records the steps" "$log_file" '==> stow the platform package set'
 
 section "the package manager for this platform, and only that one"
 # bootstrap-steps.json gates its package-manager steps with `os`, so exactly
@@ -74,12 +74,12 @@ section "the package manager for this platform, and only that one"
 # skipped is the point: a gate that silently let both through would install
 # Homebrew on Linux, and a gate that let neither through would produce a
 # half-applied account that still reported success.
-if [ "$PLATFORM" = darwin ]; then
+if [ "$PLATFORM" = macos ]; then
   assert_file_has "the Linux steps were skipped as not-for-this-OS" "$out" \
     'install Nix \(single-user\) \(skipped, declared for linux'
 else
   assert_file_has "the macOS steps were skipped as not-for-this-OS" "$out" \
-    'install Homebrew into ~/\.homebrew \(skipped, declared for darwin'
+    'install Homebrew into ~/\.homebrew \(skipped, declared for macos'
   assert_file_lacks "brew was never invoked on Linux" "$BREW_CALL_LOG" '.'
   assert_missing "no Homebrew prefix was created on Linux" "$HOME/.homebrew"
 fi
@@ -92,7 +92,7 @@ section "Nix environment (Linux)"
 assert_file_has "the installer step was skipped via its declared state" "$out" \
   'install Nix \(single-user\) \(skipped, already in the declared state\)'
 assert_file_has "built from the repo flake, into the expected out-link" "$NIX_CALL_LOG" \
-  "build --out-link $NIX_ENV path:$REPO/nix#default"
+  "build --out-link $NIX_ENV path:$REPO/manifests/linux#default"
 # The experimental-features flag is not decoration: on a fresh machine
 # ~/.config/nix/nix.conf has not been stowed yet (stow is what this build
 # produces), so without it on the command line the build fails outright.
@@ -106,7 +106,7 @@ assert_true "the out-link is a symlink into the store" \
 # stow in particular is what the very next bootstrap step runs.
 while read -r pkg; do
   assert_true "flake package present in the environment: $pkg" test -x "$NIX_ENV/bin/$pkg"
-done < <(sed -n '/paths = with pkgs;/,/^[[:space:]]*\];/p' "$REPO/nix/flake.nix" |
+done < <(sed -n '/paths = with pkgs;/,/^[[:space:]]*\];/p' "$REPO/manifests/linux/flake.nix" |
            sed -e 's/#.*$//' |
            sed -n -E 's/^[[:space:]]*(unstable\.)?([A-Za-z0-9_-]+)[[:space:]]*$/\2/p')
 assert_true "stow, the thing the next step needs, came out of it" test -x "$NIX_ENV/bin/stow"
@@ -124,7 +124,7 @@ assert_file_has "the chsh step was skipped without sudo" "$out" \
 assert_eq "the test account's login shell was not changed" \
   "$LOGIN_SHELL_BEFORE" "$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"
 # The flake is a manifest the root scripts apply, not a dotfile: stow must not
-# deploy it. A ~/nix directory here would mean it drifted back into dev/.
+# deploy it. A ~/nix directory here would mean it drifted into a package.
 assert_missing "the flake is not deployed into \$HOME" "$HOME/nix"
 
 else
@@ -143,12 +143,12 @@ else
 fi
 assert_missing "nothing installed to /usr/local/Homebrew" /usr/local/Homebrew
 assert_file_has "brew install ran for stow and mise" "$BREW_CALL_LOG" '^install stow mise$'
-assert_file_has "brew bundle used the repo Brewfile" "$BREW_CALL_LOG" "^bundle --file=$REPO/dev/Brewfile$"
+assert_file_has "brew bundle used the repo Brewfile" "$BREW_CALL_LOG" "^bundle --file=$REPO/manifests/macos/Brewfile$"
 
 section "Brewfile packages reached brew bundle"
 while read -r pkg; do
   assert_file_has "Brewfile entry installed: $pkg" "$HOME/.homebrew/bundled.txt" "^${pkg}$"
-done < <(sed -e 's/#.*$//' "$REPO/dev/Brewfile" | sed -n -E 's/^[[:space:]]*brew[[:space:]]+"([^"]+)".*/\1/p')
+done < <(sed -e 's/#.*$//' "$REPO/manifests/macos/Brewfile" | sed -n -E 's/^[[:space:]]*brew[[:space:]]+"([^"]+)".*/\1/p')
 assert_file_lacks "commented-out casks were not installed" "$HOME/.homebrew/bundled.txt" '^(visual-studio-code|obsidian)$'
 fi
 
@@ -159,11 +159,11 @@ section "pinned tools: mise owns them, and owns them exclusively"
 # a formula and a pin of the same name would race for PATH.
 # Whichever package manager provided mise is the one whose shim recorded the
 # call, so read the log belonging to this platform's stub.
-if [ "$PLATFORM" = darwin ]; then MISE_SHIM_LOG="$BREW_SHIM_LOG"; else MISE_SHIM_LOG="$NIX_SHIM_LOG"; fi
+if [ "$PLATFORM" = macos ]; then MISE_SHIM_LOG="$BREW_SHIM_LOG"; else MISE_SHIM_LOG="$NIX_SHIM_LOG"; fi
 assert_file_has "mise was asked to install the pinned tools" "$MISE_SHIM_LOG" '^mise install$'
 assert_true "the mise config was linked before mise ran" test -f "$HOME/.config/mise/config.toml"
 
-MISE_CONFIG="$REPO/dev/.config/mise/config.toml"
+MISE_CONFIG="$REPO/packages/common/.config/mise/config.toml"
 # Tool names as declared, one per line (comments and the [tools] header out).
 mise_tools() {
   sed -e 's/#.*$//' "$MISE_CONFIG" |
@@ -188,10 +188,10 @@ while read -r tool version; do
   # both manifests ship to both machines, so a duplicate is a bug everywhere,
   # not only where it would currently bite.
   assert_file_lacks "not also declared in the Brewfile: $brewname" \
-    "$REPO/dev/Brewfile" "^[[:space:]]*brew[[:space:]]+\"$brewname\""
+    "$REPO/manifests/macos/Brewfile" "^[[:space:]]*brew[[:space:]]+\"$brewname\""
   assert_file_lacks "not also declared in the Nix flake: $tool" \
-    "$REPO/nix/flake.nix" "^[[:space:]]*(unstable\.)?$tool[[:space:]]*(#.*)?$"
-  if [ "$PLATFORM" = darwin ]; then
+    "$REPO/manifests/linux/flake.nix" "^[[:space:]]*(unstable\.)?$tool[[:space:]]*(#.*)?$"
+  if [ "$PLATFORM" = macos ]; then
     assert_file_lacks "not installed by brew either: $brewname" \
       "$HOME/.homebrew/bundled.txt" "^${brewname}$"
   else
@@ -201,29 +201,42 @@ done < <(mise_tools)
 
 # The Brewfile has a job left, and it is not CLI tools: the bootstrap pair,
 # what mise has no backend for, the docker plugins, and casks.
-assert_file_has "Brewfile still declares the bootstrap pair" "$REPO/dev/Brewfile" '^brew "stow"$'
-assert_file_has "Brewfile still declares mise itself" "$REPO/dev/Brewfile" '^brew "mise"$'
-assert_file_has "docker CLI plugins stay with Homebrew" "$REPO/dev/Brewfile" '^brew "docker-buildx"$'
+assert_file_has "Brewfile still declares the bootstrap pair" "$REPO/manifests/macos/Brewfile" '^brew "stow"$'
+assert_file_has "Brewfile still declares mise itself" "$REPO/manifests/macos/Brewfile" '^brew "mise"$'
+assert_file_has "docker CLI plugins stay with Homebrew" "$REPO/manifests/macos/Brewfile" '^brew "docker-buildx"$'
 
 # The Linux manifest carries the same job, and the same two bootstrap
 # dependencies -- if either fell out of the flake, a fresh Linux machine would
 # get as far as `stow: command not found`.
-assert_file_has "the flake still declares stow" "$REPO/nix/flake.nix" '^[[:space:]]*stow[[:space:]]*(#.*)?$'
-assert_file_has "the flake still declares mise" "$REPO/nix/flake.nix" '^[[:space:]]*unstable\.mise[[:space:]]*(#.*)?$'
+assert_file_has "the flake still declares stow" "$REPO/manifests/linux/flake.nix" '^[[:space:]]*stow[[:space:]]*(#.*)?$'
+assert_file_has "the flake still declares mise" "$REPO/manifests/linux/flake.nix" '^[[:space:]]*unstable\.mise[[:space:]]*(#.*)?$'
 # flake.lock is what makes the flake a pin rather than a moving target; without
 # it committed, every machine resolves nixos-26.05 to whatever is current.
-assert_exists "the flake is locked to an exact revision" "$REPO/nix/flake.lock"
-assert_file_has "the lock names a nixpkgs revision" "$REPO/nix/flake.lock" '"rev": "[0-9a-f]{40}"'
+assert_exists "the flake is locked to an exact revision" "$REPO/manifests/linux/flake.lock"
+assert_file_has "the lock names a nixpkgs revision" "$REPO/manifests/linux/flake.lock" '"rev": "[0-9a-f]{40}"'
 
 section "every managed file is linked back to the repository"
-while read -r rel; do
-  assert_symlink_to "linked: ~/$rel" "$HOME/$rel" "$REPO/dev/$rel"
-done < <(package_files "$REPO/dev")
+# Derived from the package SET this platform deploys, so a file added to any of
+# common/unix/<platform> is covered with no test edit -- and, just as important,
+# a file in the other platform's package is not expected here at all.
+for pkg in "${PACKAGE_SET[@]}"; do
+  while read -r rel; do
+    assert_symlink_to "linked: ~/$rel ($pkg)" "$HOME/$rel" "$REPO/packages/$pkg/$rel"
+  done < <(package_files "$REPO/packages/$pkg")
+done
 
 section "every managed directory is a real directory, never folded into the repo"
 while read -r rel; do
   assert_real_dir "real dir: ~/$rel" "$HOME/$rel"
-done < <(package_dirs "$REPO/dev")
+done < <(package_dirs $(deployed_package_dirs))
+
+section "the other platform's package is not deployed here"
+# The split replaced the $OSTYPE guards inside these files, so a leaked link is
+# no longer merely inert -- packages/macos/.zprofile.d/50-homebrew-isolated.zsh
+# runs `brew shellenv` unconditionally and would break every login shell.
+while read -r rel; do
+  assert_missing "not deployed: ~/$rel (from packages/$FOREIGN_PACKAGE)" "$HOME/$rel"
+done < <(package_files "$REPO/packages/$FOREIGN_PACKAGE")
 
 section "stateful directories stay writable by their tools"
 assert_true "~/.pi/agent accepts runtime state" \
@@ -251,7 +264,7 @@ assert_file_has "~/.local/bin is on PATH"    "$zsh_out" "^PATH=.*$HOME/\.local/b
 assert_file_has "EDITOR is nvim"             "$zsh_out" '^EDITOR=nvim$'
 assert_file_has "NVIM_APPNAME is set"        "$zsh_out" '^NVIM_APPNAME=nvim$'
 
-if [ "$PLATFORM" = darwin ]; then
+if [ "$PLATFORM" = macos ]; then
   assert_file_has "~/.homebrew/bin is on PATH" "$zsh_out" "^PATH=.*$HOME/\.homebrew/bin"
   assert_file_has "HOMEBREW_PREFIX is the isolated prefix" "$zsh_out" "^HOMEBREW_PREFIX=$HOME/.homebrew$"
   assert_file_lacks "no isolation tripwire warning" "$zsh_out" 'isolation may be broken'
@@ -288,15 +301,78 @@ else
   assert_file_lacks "no missing-environment warning" "$zsh_out" 'run ./reapply.sh to build'
 fi
 
+# A NON-login interactive shell must get the same environment. zsh reads
+# .zprofile for login shells only: macOS Terminal.app starts one, but most
+# Linux terminal emulators start a non-login interactive shell, which reads
+# only .zshrc. Before .zshrc learned to load the profile chain itself, that
+# combination produced a fully deployed machine that behaved as though nothing
+# were installed -- no mise, no pinned tools, no aliases -- which is not a
+# failure any other assertion here would have caught.
+nonlogin_out="$SANDBOX/zshrc-nonlogin.out"
+zsh -ic 'printf "PATH=%s\nEDITOR=%s\nLOADED=%s\n" "$PATH" "$EDITOR" "${_DOTFILES_PROFILE_LOADED:-unset}"' \
+  >"$nonlogin_out" 2>&1 || true
+assert_file_has "a non-login shell loads the profile chain" "$nonlogin_out" '^LOADED=1$'
+assert_file_has "a non-login shell gets EDITOR"            "$nonlogin_out" '^EDITOR=nvim$'
+assert_file_has "a non-login shell gets ~/.local/bin"      "$nonlogin_out" "^PATH=.*$HOME/\.local/bin"
+
+# ...and a login shell must not do the work twice. The sentinel is exported so
+# .zshrc skips it, which also keeps subshells from re-running compinit and
+# `mise activate` on every prompt.
+dup_out="$SANDBOX/zprofile-dup.out"
+zsh -lc 'printf "%s\n" "$PATH" | tr ":" "\n" | sort | uniq -d | grep . && echo DUPLICATED || echo CLEAN' \
+  >"$dup_out" 2>&1 || true
+assert_file_has "a login shell does not source the profile twice" "$dup_out" '^CLEAN$'
+
 # Whatever provided them, the tools this account pins must resolve inside
 # $HOME rather than to the distribution's or the system's copy -- that is what
 # 55-mise.zsh's precedence tripwire exists to catch, and it is the one
 # assertion that means the same thing on both platforms.
 assert_file_lacks "no pinned tool is shadowed from outside \$HOME" "$zsh_out" 'is being shadowed'
 
+# --------------------------------------------------------------------------
+section "the package split itself is sound"
+# --------------------------------------------------------------------------
+# Every package's .zprofile.d/ is merged by stow into ONE ~/.zprofile.d/, so
+# numbering keeps working across packages without any reserved-range
+# convention -- two packages picking the same number is harmless, since both
+# files load and only their relative order to each other would be undefined.
+# The one thing that is NOT harmless is two packages shipping the same
+# FILENAME: that is a hard stow conflict, and it is the only coordination
+# packages actually need. Assert it rather than document it.
+assert_true "no two packages ship the same .zprofile.d filename" python3 -c '
+import collections, pathlib, sys
+root = pathlib.Path(sys.argv[1]) / "packages"
+owners = collections.defaultdict(list)
+for pkg in sorted(p.name for p in root.iterdir() if p.is_dir()):
+    d = root / pkg / ".zprofile.d"
+    if d.is_dir():
+        for f in d.iterdir():
+            owners[f.name].append(pkg)
+dupes = {n: p for n, p in owners.items() if len(p) > 1}
+assert not dupes, f"same filename in multiple packages: {dupes}"
+' "$REPO"
+
+# The ordering constraint that actually exists: whichever package manager this
+# platform uses must load before the shared mise snippet, because it is what
+# puts mise on PATH. Everything else in the chain is order-independent.
+pkgmgr_snippet="$(cd "$HOME/.zprofile.d" && ls | grep -E "(homebrew|nix)" | head -1)"
+assert_true "a package-manager snippet was deployed" test -n "$pkgmgr_snippet"
+assert_true "it sorts before the shared mise snippet" \
+  bash -c '[ "$(printf "%s\n55-mise.zsh\n" "$1" | sort | head -1)" = "$1" ]' _ "$pkgmgr_snippet"
+
+# stow-packages.sh and reapply.sh must both refuse the other platform's
+# package. Without the $OSTYPE guards the split removed, a leaked link is no
+# longer inert -- it breaks every login shell.
+assert_false "stow-packages.sh refuses the other platform's package" \
+  env HOME="$HOME" "$REPO/stow-packages.sh" "$FOREIGN_PACKAGE"
+assert_false "reapply.sh refuses the other platform's package" \
+  bash -c 'cd "$1" && ./reapply.sh --yes --package "$2"' _ "$REPO" "$FOREIGN_PACKAGE"
+assert_missing "and nothing from it reached \$HOME" \
+  "$HOME/$(package_files "$REPO/packages/$FOREIGN_PACKAGE" | head -1)"
+
 section "the deployed sync script is the one on PATH"
 assert_symlink_to "~/.local/bin/sync-external-repos is linked" \
-  "$HOME/.local/bin/sync-external-repos" "$REPO/dev/.local/bin/sync-external-repos"
+  "$HOME/.local/bin/sync-external-repos" "$REPO/packages/unix/.local/bin/sync-external-repos"
 assert_true "and it is executable" test -x "$HOME/.local/bin/sync-external-repos"
 
 finish

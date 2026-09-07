@@ -13,17 +13,17 @@ same properties are approximated with plain manifests. On **Linux** Nix
 
 | Domain | Declared in | Reconciled by |
 | --- | --- | --- |
-| Shell/config files | `dev/` (stow package) | `reapply.sh` (links + prunes stale ones) |
-| CLI tools + runtimes | `dev/.config/mise/config.toml` | `reapply.sh` / `bootstrap.sh` (`mise install`) |
-| What mise can't pin (macOS) | `dev/Brewfile` | `reapply.sh` (installs; reports drift; `--prune` removes) |
-| What mise can't pin (Linux) | `nix/flake.nix` + `flake.lock` | `reapply.sh` (`nix build`; rebuilt whole, so a deleted line *is* the removal) |
-| External repos | `dev/.config/external-repos.json` | `sync-external-repos` |
-| Fresh-machine setup | `bootstrap-steps.json` | `bootstrap.sh` |
-| Docker CLI plugins (macOS) | `dev/.local/bin/link-docker-cli-plugins` | `reapply.sh` (runs it after `brew bundle`) |
+| Shell/config files | `packages/{common,unix,macos,linux}/` (stow packages) | `reapply.sh` (links + prunes stale ones) |
+| CLI tools + runtimes | `packages/common/.config/mise/config.toml` | `reapply.sh` / `bootstrap.sh` (`mise install`) |
+| What mise can't pin (macOS) | `manifests/macos/Brewfile` | `reapply.sh` (installs; reports drift; `--prune` removes) |
+| What mise can't pin (Linux) | `manifests/linux/flake.nix` + `flake.lock` | `reapply.sh` (`nix build`; rebuilt whole, so a deleted line *is* the removal) |
+| External repos | `packages/common/.config/external-repos.json` | `sync-external-repos` |
+| Fresh-machine setup | `manifests/common/bootstrap-steps.json` | `bootstrap.sh` |
+| Docker CLI plugins (macOS) | `packages/macos/.local/bin/link-docker-cli-plugins` | `reapply.sh` (runs it after `brew bundle`) |
 
 Rules that keep it from drifting again:
 - Installing something with `brew install` is a *draft*. It is not real
-  until it is in `dev/Brewfile`; `reapply.sh` reports anything installed
+  until it is in `manifests/macos/Brewfile`; `reapply.sh` reports anything installed
   that isn't declared, so undeclared packages surface on the next run
   rather than silently becoming part of the machine.
 - The Brewfile describes the whole closure, including packages you might
@@ -37,7 +37,7 @@ Rules that keep it from drifting again:
 ## Cross-platform rules
 
 The two machines diverge in exactly one place: the `os` field on a step in
-`bootstrap-steps.json` (`"darwin"` / `"linux"`; omit it for steps that are
+`manifests/common/bootstrap-steps.json` (`"macos"` / `"linux"`; omit it for steps that are
 the same everywhere). Do not add a second mechanism for OS branching --
 `reapply.sh` reads `uname -s` into `$PLATFORM` and gates the same way, and
 the shell snippets gate on `$OSTYPE`. Anything beyond that should be
@@ -49,9 +49,13 @@ Consequences worth remembering before editing:
   `50-homebrew-isolated.zsh` ran `eval "$(~/.homebrew/bin/brew shellenv)"`
   unconditionally; on a machine with no `~/.homebrew` that fails on every
   login shell.
-- `nix/flake.nix` is at the repo root, NOT in `dev/`. stow deploys what is
-  under `dev/`, and the flake is a manifest the root scripts apply, not a
-  dotfile -- in `dev/` it showed up as a stray `~/nix/` directory.
+- **The rule for which tree a file belongs in**: `manifests/<platform>/` is
+  declared state *applied from the repository* (Brewfile, flake, the bootstrap
+  step list); `packages/<pkg>/` is declared state *deployed into `$HOME`*. The
+  mise config is the awkward case and lives in `packages/common/` despite
+  being the most "common manifest" here, because mise reads it from
+  `~/.config/mise/config.toml` -- it has to be stowed. Putting a manifest in a
+  package is how `~/Brewfile` and a stray `~/nix/` directory happened.
 - mise comes from `nixpkgs-unstable` in the flake, deliberately, and only
   mise. Its tool *registry* ships inside the binary, so a stable-channel
   mise cannot resolve a tool added to the registry since -- a hard
@@ -81,7 +85,7 @@ account's non-default prefix is usually built from source; mise pins an
 exact version, keeps installs side by side (rollback = edit the version
 string and rerun), and ships prebuilt binaries. Add a tool with
 `mise use -g <tool>@<exact version>` and commit the resulting
-`dev/.config/mise/config.toml` change -- do not add it to the Brewfile.
+`packages/common/.config/mise/config.toml` change -- do not add it to the Brewfile.
 Check `mise registry` before reaching for `brew install`.
 
 What legitimately stays in the Brewfile, and only this: `stow` and `mise`
@@ -89,11 +93,11 @@ What legitimately stays in the Brewfile, and only this: `stow` and `mise`
 formulae with no mise backend (`git`, `tree`, `hf`, `audio-cpp`), the docker
 CLI plugins, and casks. mise's own version is consequently unpinned; that
 gap is accepted and documented in the README rather than papered over.
-`nix/flake.nix` carries the same job on Linux and the same rule for what may
+`manifests/linux/flake.nix` carries the same job on Linux and the same rule for what may
 go in it -- with the difference that `flake.lock` pins everything there,
 including mise, so that gap does not exist on Linux.
 
-Only *globally* useful runtimes belong in `dev/.config/mise/config.toml`.
+Only *globally* useful runtimes belong in `packages/common/.config/mise/config.toml`.
 A runtime that one project needs belongs in that project's own
 `.mise.toml` (`mise use dotnet@10.0.400` inside the repo), so the version
 travels with the code rather than becoming an account-wide fact.
@@ -104,7 +108,7 @@ shim would leave `docker buildx` broken. They stay Homebrew formulae -- `docker-
 though mise has a backend for it, since `link-docker-cli-plugins` reads one
 source directory and splitting them would leave `docker compose` broken --
 and
-`dev/.local/bin/link-docker-cli-plugins` wires them into the plugin
+`packages/macos/.local/bin/link-docker-cli-plugins` wires them into the plugin
 directory -- without it, a fresh machine installs the formulae and still
 reports `docker: unknown command: docker buildx`. Pointing docker's
 `cliPluginsExtraDirs` at brew's bin would also work but is deliberately
@@ -122,12 +126,29 @@ profile is archived here (not live) pending a move to its own repository.
 
 - **`archive/admin/`** — frozen, reference-only snapshot of the main/admin
   account profile (`.zshrc`, `.zprofile` with the `dev-shell` ssh helper,
-  `.macos`). Not deployed from here; nothing in `dev/` or the bootstrap
+  `.macos`). Not deployed from here; nothing in `packages/` or the bootstrap
   depends on it. Don't extend it — it's leaving this repo.
-- **`dev/`** — deployed on the isolated non-admin dev account. Owns:
+- **`packages/`** — the stow packages, deployed with
+  `stow -d packages -t ~ common unix <platform>`. A file's *package is its
+  platform declaration*: `common/` goes everywhere (including the future
+  Windows milestone), `unix/` is the zsh chain macOS and Linux share, and
+  `macos/`/`linux/` hold only what is genuinely specific. Nothing in a
+  package needs an `$OSTYPE` guard, because it never reaches the other
+  machine -- which is also why `stow-packages.sh` and `reapply.sh` refuse to
+  deploy another platform's package: without those guards a leaked link is no
+  longer inert, it breaks every login shell.
+- **`manifests/`** — `common/bootstrap-steps.json`, `macos/Brewfile`,
+  `linux/flake.nix` + `flake.lock`.
+- **`lib/platform.sh`** — the only place in the repository that calls
+  `uname`. Exports `$PLATFORM` (`macos`/`linux`, this repo's own vocabulary,
+  used for directory names and the `os` field) and `$PLATFORM_UNAME`
+  (`Darwin`/`Linux`, for anything that must speak the OS's own vocabulary --
+  a download URL slug, a Nix system string). Never interpolate `$PLATFORM`
+  into something an external tool parses.
+- The dev account owns:
   - Homebrew, installed to `~/.homebrew` (never `/opt/homebrew` or
     `/usr/local`) — no sudo required to install or use. macOS only; on
-    Linux the equivalent layer is Nix (`nix/flake.nix`, at the repo root).
+    Linux the equivalent layer is Nix (`manifests/linux/flake.nix`, at the repo root).
   - `.zprofile.d/*.zsh` — numbered snippets sourced in order by `.zprofile`
     (a thin loader). Add new snippets here rather than editing `.zprofile`
     directly.
@@ -149,12 +170,12 @@ profile is archived here (not live) pending a move to its own repository.
 git clone https://github.com/eklavyamirani/dotfiles ~/dotfiles && cd ~/dotfiles
 ./bootstrap.sh
 ```
-`bootstrap.sh` (repo root -- deliberately not in `dev/.local/bin`, since it
+`bootstrap.sh` (repo root -- deliberately not in a package's `.local/bin`, since it
 runs `stow` itself and can't depend on `stow` having already run) is a
 generic step-runner; the actual steps (package-manager install,
 `stow`/`mise` install, `stow`, `sync-external-repos`, and then
 `brew bundle` on macOS or `nix build` on Linux) are declared in
-`bootstrap-steps.json`, not hardcoded in the script. Steps carry an
+`manifests/common/bootstrap-steps.json`, not hardcoded in the script. Steps carry an
 optional `os` field; the gate is checked before `skip_if`/`state`, since a
 step for the other platform may have predicates that cannot be evaluated
 here at all. Each step's `command`
@@ -172,7 +193,7 @@ directories (such as `~/.pi`) into the repository.
 cd ~/dotfiles && git pull && ./reapply.sh
 ```
 `reapply.sh` (also at the repo root, and for the same reason as
-`bootstrap.sh` -- it runs `stow`, so it can't live in `dev/.local/bin`) is
+`bootstrap.sh` -- it runs `stow`, so it can't live in a package's `.local/bin`) is
 the steady-state counterpart to bootstrap: it re-links the `dev` package,
 syncs external repos, runs `mise install`, and applies this platform's
 package manifest (`brew bundle` on macOS, `nix build` on Linux), but does
@@ -219,8 +240,9 @@ branch asserting the *other* platform's steps were skipped; everything else (sto
 real zsh) is exercised for real. Run them with
 `docker build -f tests/Dockerfile -t dotfiles-ci tests/` then
 `docker run --rm --network none -v "$PWD:/repo:ro" -e SOURCE_REPO=/repo dotfiles-ci /repo/tests/run-tests.sh`.
-The file-level assertions are derived by walking `dev/`, so new managed files
-and directories are covered without touching the tests. CI
+The file-level assertions are derived by walking the deployed package set, so
+new managed files and directories are covered without touching the tests --
+and files in the *other* platform's package are asserted absent. CI
 (`.github/workflows/ci.yml`) runs every scenario twice: in the Linux container,
 and natively on a macOS runner (`apply-macos`) so the suite is exercised on the
 OS these dotfiles actually target -- keep the harness free of GNU-only
@@ -228,7 +250,7 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
 
 ## Configuration Structure
 
-### Shell Configuration (`dev/`)
+### Shell Configuration (`packages/unix/`, `packages/<platform>/`)
 - **`.zshrc`** - prompt, fzf sourcing
 - **`.zprofile`** - thin loader, sources `.zprofile.d/*.zsh` in filename order
 - **`.zprofile.d/05-local-bin-path.zsh`** - `~/.local/bin` on PATH
@@ -252,12 +274,12 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
 - **`.zprofile.d/60-terminal-appearance.zsh`** - Claude-Dev Terminal.app
   profile bootstrap
 
-### Scripts (`dev/.local/bin`)
+### Scripts (`packages/*/.local/bin`)
 - **`sync-external-repos`** - clones/updates repos from `external-repos.json`
 - **`link-docker-cli-plugins`** - links brew's docker plugins into
   `~/.docker/cli-plugins` (idempotent; never overwrites a real file there)
 
-### Neovim Configuration (`dev/.config/nvim`, external repo via `sync-external-repos`)
+### Neovim Configuration (`~/.config/nvim`, external repo via `sync-external-repos`)
 - **`init.lua`** - Main initialization file with basic settings and keymaps
 - **`lua/config/plugins.lua`** - Plugin declarations and setup via vim-plug
 

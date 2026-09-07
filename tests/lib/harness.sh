@@ -19,11 +19,22 @@ set -uo pipefail
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_REPO="${SOURCE_REPO:-$(cd "$TESTS_DIR/.." && pwd)}"
 
-case "$(uname -s)" in
-  Darwin) PLATFORM=darwin ;;
-  *)      PLATFORM=linux ;;
+# Sourced, not recomputed: the suite must branch on exactly the value the
+# scripts under test branch on, and lib/platform.sh is the only place that
+# reads `uname`. A second copy here is how a test starts passing for the wrong
+# reason after the mapping changes.
+# shellcheck source=../../lib/platform.sh
+. "$TESTS_DIR/../lib/platform.sh"
+
+# The package set a scenario expects to be deployed on this machine.
+PACKAGE_SET=()
+while IFS= read -r _pkg; do PACKAGE_SET+=("$_pkg"); done < <(platform_package_set)
+# The platform package that must NOT be deployed here.
+case "$PLATFORM" in
+  macos) FOREIGN_PACKAGE=linux ;;
+  *)     FOREIGN_PACKAGE=macos ;;
 esac
-export PLATFORM
+export PLATFORM FOREIGN_PACKAGE
 
 CHECKS=0
 FAILURES=0
@@ -308,21 +319,34 @@ _stow_ignored() { # relative path
   return 1
 }
 
-package_files() { # package dir -- paths stow should link, relative to it
-  local pkg="$1" rel
-  while IFS= read -r rel; do
-    rel="${rel#./}"
-    _stow_ignored "$rel" || printf '%s\n' "$rel"
-  done < <(cd "$pkg" && find . -type f -o -type l | sort)
+package_files() { # package dir... -- paths stow should link, relative to $HOME
+  local pkg rel
+  for pkg in "$@"; do
+    [ -d "$pkg" ] || continue
+    while IFS= read -r rel; do
+      rel="${rel#./}"
+      _stow_ignored "$rel" || printf '%s\n' "$rel"
+    done < <(cd "$pkg" && find . -type f -o -type l | sort)
+  done | sort -u
 }
 
-package_dirs() { # package dir -- directories that must exist for real in HOME
-  local pkg="$1" rel
-  while IFS= read -r rel; do
-    rel="${rel#./}"
-    [ "$rel" = "." ] && continue
-    printf '%s\n' "$rel"
-  done < <(cd "$pkg" && find . -type d | sort)
+package_dirs() { # package dir... -- directories that must exist for real in HOME
+  local pkg rel
+  for pkg in "$@"; do
+    [ -d "$pkg" ] || continue
+    while IFS= read -r rel; do
+      rel="${rel#./}"
+      [ "$rel" = "." ] && continue
+      printf '%s\n' "$rel"
+    done < <(cd "$pkg" && find . -type d | sort)
+  done | sort -u
+}
+
+# The directories of the packages this machine deploys, as arguments for the
+# two helpers above.
+deployed_package_dirs() {
+  local pkg
+  for pkg in "${PACKAGE_SET[@]}"; do printf '%s\n' "$REPO/packages/$pkg"; done
 }
 
 # Snapshot helpers used to prove reruns don't churn the deployed tree or write

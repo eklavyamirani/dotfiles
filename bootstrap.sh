@@ -10,9 +10,9 @@
 #   cd ~/dotfiles
 #   ./bootstrap.sh
 #
-# This intentionally does NOT live in dev/.local/bin: that directory only
-# lands on PATH after `stow -t ~ dev` runs, and this script is what runs
-# `stow` in the first place -- it can't depend on its own output.
+# This intentionally does NOT live in a package's .local/bin: that directory
+# only lands on PATH after stow runs, and this script is what runs `stow` in
+# the first place -- it can't depend on its own output.
 #
 # Manifest fields per step (see bootstrap-steps.json):
 #   name     (required) -- shown in logs
@@ -34,13 +34,17 @@
 #                          success with a WARNING, because the command's exit
 #                          code and the outcome are not the same question --
 #                          see the failure-handling note below.
-#   os       (optional) -- "darwin" or "linux"; the step only runs on that
+#   os       (optional) -- "macos" or "linux"; the step only runs on that
 #                          platform and is skipped elsewhere. Omit it for the
 #                          steps that are the same everywhere (stow, mise,
 #                          external repos). This is what lets one manifest
 #                          describe both machines: the package manager differs
 #                          (Homebrew in ~/.homebrew on macOS, Nix on Linux) but
-#                          everything downstream of it does not.
+#                          everything downstream of it does not. Files, by
+#                          contrast, are NOT gated this way -- a file's package
+#                          (packages/macos, packages/linux) declares its
+#                          platform by where it lives, so it simply never
+#                          reaches the other machine.
 #   purpose  (optional) -- human-readable note, shown in logs
 #
 # Failure handling: steps are sequentially dependent (stow-ing before
@@ -61,15 +65,12 @@
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MANIFEST="${1:-$REPO_DIR/bootstrap-steps.json}"
-# Matches the `os` field a step may declare. Anything that is not Darwin is
-# treated as linux: those are the only two this repository is deployed on, and
-# a wrong guess here surfaces immediately as a skipped package-manager step
-# rather than as a silent half-apply.
-case "$(uname -s)" in
-  Darwin) PLATFORM=darwin ;;
-  *)      PLATFORM=linux ;;
-esac
+MANIFEST="${1:-$REPO_DIR/manifests/common/bootstrap-steps.json}"
+# $PLATFORM (macos|linux) is what a step's `os` field is matched against. It is
+# computed in exactly one place for the whole repository -- see lib/platform.sh
+# for why there are two names for the same machine.
+# shellcheck source=lib/platform.sh
+. "$REPO_DIR/lib/platform.sh"
 LOG_DIR="$HOME/.local/state/dotfiles"
 LOG_FILE="$LOG_DIR/setup-$(date '+%Y%m%d-%H%M%S').log"
 mkdir -p "$LOG_DIR"

@@ -14,7 +14,7 @@
 # .zprofile globs .zprofile.d/*.zsh, such a leftover breaks every new shell.
 #
 # Like bootstrap.sh, this lives at the repo root rather than in
-# dev/.local/bin: it runs stow, so it must not depend on stow having
+# a package's .local/bin: it runs stow, so it must not depend on stow having
 # already linked it onto PATH.
 #
 # Failsafes -- this script never destroys anything you could not recreate:
@@ -29,8 +29,8 @@
 #     unattended use.
 #
 # Platform: the package-manager half differs by OS and nothing else does.
-# On macOS that half is `brew bundle` against dev/Brewfile (plus the docker
-# CLI plugin links); on Linux it is a rebuild of nix/flake.nix into
+# On macOS that half is `brew bundle` against manifests/macos/Brewfile (plus the docker
+# CLI plugin links); on Linux it is a rebuild of manifests/linux/flake.nix into
 # ~/.local/state/dotfiles/nix-env. The stow, external-repo and mise halves are
 # identical on both. The Homebrew block is gated on the OS, not merely on
 # `command -v brew`: a Linux box may well have a Homebrew of its own on PATH,
@@ -43,12 +43,10 @@ set -uo pipefail
 # symlinked parent (/tmp and /var are symlinks on macOS) would never match its
 # own links, and stale ones would silently survive.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-PACKAGE="dev"
+# shellcheck source=lib/platform.sh
+. "$REPO_DIR/lib/platform.sh"
+PACKAGES=()          # empty => this platform's default set (common unix <platform>)
 TARGET="$HOME"
-case "$(uname -s)" in
-  Darwin) PLATFORM=darwin ;;
-  *)      PLATFORM=linux ;;
-esac
 DRY_RUN=0
 ASSUME_YES=0
 RUN_BREW=1
@@ -67,15 +65,17 @@ usage: reapply.sh [options]
                  declare (off by default: drift is always reported, but
                  removing software is an explicit choice). macOS only --
                  on Linux the Nix environment is rebuilt as a whole, so
-                 deleting a line from nix/flake.nix already removes it
+                 deleting a line from manifests/linux/flake.nix already removes it
   --yes, -y      do not prompt for confirmation
   --no-brew      skip `brew bundle`
   --no-upgrade   install missing packages but do not upgrade existing ones
                  (`brew bundle` upgrades by default)
   --no-sync      skip `sync-external-repos`
   --no-mise      skip `mise install`
-  --no-nix       skip rebuilding nix/flake.nix (Linux only)
-  --package NAME stow package to re-apply (default: dev)
+  --no-nix       skip rebuilding manifests/linux/flake.nix (Linux only)
+  --package NAME stow package to re-apply; repeatable. Default is this
+                 platform's set: common unix <platform>. A package belonging
+                 to a DIFFERENT platform is refused -- see the note below
   --target DIR   stow target directory (default: $HOME)
   -h, --help     this message
 USAGE
@@ -91,7 +91,7 @@ while [ $# -gt 0 ]; do
     --no-sync) RUN_SYNC=0 ;;
     --no-mise) RUN_MISE=0 ;;
     --no-nix)  RUN_NIX=0 ;;
-    --package) PACKAGE="${2:?--package needs a value}"; shift ;;
+    --package) PACKAGES+=("${2:?--package needs a value}"); shift ;;
     --target)  TARGET="${2:?--target needs a value}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -99,7 +99,19 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-PACKAGE_DIR="$REPO_DIR/$PACKAGE"
+# Default to this platform's set, then refuse anything belonging to another
+# platform. This is the guard for the one way a bad link can survive: stow
+# would happily link packages/macos/.zprofile.d/50-homebrew-isolated.zsh into a
+# Linux $HOME, and because its target then EXISTS, the stale-link scan below --
+# which only reclaims links whose target is gone -- would never take it back.
+# It would be sourced by every login shell from then on. `--package macos` on a
+# Linux box is one typo away, so the typo is what gets refused.
+if [ "${#PACKAGES[@]}" -eq 0 ]; then
+  while IFS= read -r _pkg; do PACKAGES+=("$_pkg"); done < <(platform_package_set)
+fi
+platform_assert_packages "${PACKAGES[@]}" || exit 2
+
+PACKAGES_DIR="$REPO_DIR/packages"
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 LOG_DIR="$HOME/.local/state/dotfiles"
 LOG_FILE="$LOG_DIR/reapply-$STAMP.log"
@@ -114,16 +126,21 @@ log()  { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 fail() { printf '[%s] ERROR: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 NIX_ENV="$HOME/.local/state/dotfiles/nix-env"
-# At the repo root, not inside the stow package: it is a manifest this
-# script applies, not a file that gets deployed into $HOME -- the same
-# reason bootstrap.sh and reapply.sh themselves live at the root.
-FLAKE_DIR="$REPO_DIR/nix"
-# nix-command/flakes are enabled in the stowed dev/.config/nix/nix.conf, but
+# Manifests are applied FROM the repository; packages are deployed INTO $HOME.
+# That single rule decides which tree a file belongs in, and it is why the
+# Brewfile and the flake are manifests while the mise config is a package --
+# mise reads ~/.config/mise/config.toml, so it has to be stowed.
+FLAKE_DIR="$REPO_DIR/manifests/linux"
+BREWFILE="$REPO_DIR/manifests/macos/Brewfile"
+MISE_CONFIG="$PACKAGES_DIR/common/.config/mise/config.toml"
+# nix-command/flakes are enabled in the stowed packages/linux/.config/nix/nix.conf, but
 # this script must work even when that file is the very thing being repaired,
 # so the flags are passed explicitly here too.
 NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
 
-[ -d "$PACKAGE_DIR" ] || { fail "stow package not found: $PACKAGE_DIR"; exit 1; }
+for _pkg in "${PACKAGES[@]}"; do
+  [ -d "$PACKAGES_DIR/$_pkg" ] || { fail "stow package not found: packages/$_pkg"; exit 1; }
+done
 
 # On Linux, stow and mise come out of the Nix environment this script itself
 # maintains. Put it (and nix) on PATH before the precondition check below, so
@@ -141,12 +158,38 @@ command -v stow >/dev/null 2>&1 || {
   exit 1
 }
 
-log "re-applying package '$PACKAGE' into $TARGET (transcript: $LOG_FILE)"
+log "re-applying package(s) '${PACKAGES[*]}' into $TARGET (transcript: $LOG_FILE)"
 
 # --- plan: dangling links left behind by upstream renames/deletions ------
 # A link qualifies only if it is a symlink, its target is missing, AND that
 # target resolves inside this repository. Anything else is somebody else's
 # business and is deliberately left alone.
+# Resolve a path to a physical one even though its tail no longer exists.
+#
+# A dangling link has to be compared against $REPO_DIR as a real path, not as
+# literal text, because a relative link is full of '..' segments that only `cd`
+# can resolve. The obvious approach -- resolve the target's parent directory --
+# holds only when the *file* is what went missing. It breaks the moment a whole
+# directory does: splitting the single `dev` package into packages/{common,unix,
+# macos,linux} deleted `dev/` outright, so every deployed link's parent vanished
+# with it, every `cd` failed, and the scan skipped the very links it exists to
+# reclaim. stow then reported them as conflicts, and the backup step declined to
+# move them (they are symlinks, not real files), so the re-apply would have
+# stalled with no way forward.
+#
+# So: walk up to the deepest ancestor that DOES still exist, resolve that one
+# physically, and re-append the rest. Portable to bash 3.2 -- `realpath -m`
+# would do this in one call but does not exist on macOS.
+resolve_missing() { # path -> physical path, or non-zero if nothing resolves
+  local dir="$1" tail=""
+  while [ ! -e "$dir" ] && [ "$dir" != / ] && [ "$dir" != . ]; do
+    tail="$(basename "$dir")${tail:+/$tail}"
+    dir="$(dirname "$dir")"
+  done
+  dir="$(cd "$dir" 2>/dev/null && pwd -P)" || return 1
+  if [ -n "$tail" ]; then printf '%s/%s\n' "$dir" "$tail"; else printf '%s\n' "$dir"; fi
+}
+
 STALE_LIST="$(mktemp)"
 trap 'rm -f "$STALE_LIST"' EXIT
 
@@ -154,15 +197,10 @@ while IFS= read -r -d '' link; do
   [ -e "$link" ] && continue                      # target exists -> healthy
   raw="$(readlink "$link")"
   case "$raw" in
-    /*) link_dir="" ;;
-    *)  link_dir="$(dirname "$link")" ;;
+    /*) candidate="$raw" ;;
+    *)  candidate="$(dirname "$link")/$raw" ;;
   esac
-  # Resolve through the target's *parent* (which still exists even though the
-  # target itself does not) so that a relative link full of '..' segments is
-  # compared against REPO_DIR as a real path, not as literal text.
-  target_parent="$(cd "${link_dir:+$link_dir/}$(dirname "$raw")" 2>/dev/null && pwd -P)" || continue
-  [ -n "$target_parent" ] || continue
-  resolved="$target_parent/$(basename "$raw")"
+  resolved="$(resolve_missing "$candidate")" || continue
   case "$resolved" in
     "$REPO_DIR"/*) printf '%s\n' "$link" >> "$STALE_LIST" ;;
   esac
@@ -180,9 +218,38 @@ done < <(find "$TARGET" -maxdepth 6 \
 STALE_COUNT=$(wc -l < "$STALE_LIST" | tr -d ' ')
 
 # --- plan: what stow itself intends to do --------------------------------
-"$REPO_DIR/prepare-stow-targets.sh" "$PACKAGE" "$TARGET" >/dev/null
-STOW_PLAN="$(stow -n -v -R -d "$REPO_DIR" -t "$TARGET" "$PACKAGE" 2>&1)"
-NEW_LINKS="$(printf '%s\n' "$STOW_PLAN" | grep '^LINK:' | grep -v 'reverts previous action' || true)"
+for _pkg in "${PACKAGES[@]}"; do
+  "$REPO_DIR/prepare-stow-targets.sh" "$_pkg" "$TARGET" >/dev/null
+done
+STOW_PLAN="$(stow -n -v -R -d "$PACKAGES_DIR" -t "$TARGET" "${PACKAGES[@]}" 2>&1)"
+# Net-new links only. stow's dry run is a running narrative, not a summary: it
+# will propose an action and then cancel it on a LATER line, and the
+# "(reverts previous action)" marker sits on the cancelling line rather than on
+# the one being cancelled. Filtering LINK lines that carry the marker
+# themselves is therefore not enough.
+#
+# The case that matters here is tree folding. With one package, stow never had
+# a reason to fold ~/.zprofile.d. With several, its dry run unstows everything,
+# sees the directory empty, proposes replacing it with a single symlink into
+# ONE package -- and then immediately reverts, twice, before settling on MKDIR
+# plus individual links, which is what really happens. Reporting those two
+# phantom folds told the user their whole snippet directory was about to
+# collapse into the linux package. The plan is what gets approved, so it has to
+# describe the outcome, not stow's scratch work.
+NEW_LINKS="$(printf '%s\n' "$STOW_PLAN" | awk '
+  /^UNLINK: .* \(reverts previous action\)$/ {
+    path = $0
+    sub(/^UNLINK: /, "", path); sub(/ \(reverts previous action\)$/, "", path)
+    reverted[path] = 1
+    next
+  }
+  /^LINK: / && !/reverts previous action/ {
+    path = $0
+    sub(/^LINK: /, "", path); sub(/ =>.*$/, "", path)
+    line[++n] = $0; target[n] = path
+  }
+  END { for (i = 1; i <= n; i++) if (!(target[i] in reverted)) print line[i] }
+' || true)"
 CONFLICTS="$(printf '%s\n' "$STOW_PLAN" | grep -F 'existing target' || true)"
 
 # stow words conflicts two different ways depending on why the target is in
@@ -224,8 +291,7 @@ fi
 # installed" and would make every drift report a false alarm.
 BREW_MISSING=""
 BREW_UNDECLARED=""
-BREWFILE="$PACKAGE_DIR/Brewfile"
-if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = darwin ] && [ -f "$BREWFILE" ] \
+if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = macos ] && [ -f "$BREWFILE" ] \
    && command -v brew >/dev/null 2>&1; then
   declared_formulae="$(brew bundle list --formula --file="$BREWFILE" 2>/dev/null | sort -u)"
   declared_casks="$(brew bundle list --cask --file="$BREWFILE" 2>/dev/null | sort -u)"
@@ -270,7 +336,7 @@ if [ "$RUN_NIX" -eq 1 ] && [ "$PLATFORM" = linux ] && [ -f "$FLAKE_DIR/flake.nix
   elif [ -z "$NIX_WANTED" ]; then
     log "  rebuild the Nix environment (could not evaluate the flake ahead of time)"
   elif [ "$NIX_WANTED" = "$NIX_CURRENT" ]; then
-    log "  no Nix drift: $NIX_ENV already matches nix/flake.nix"
+    log "  no Nix drift: $NIX_ENV already matches manifests/linux/flake.nix"
   else
     log "  rebuild the Nix environment ($NIX_ENV):"
     log "        from: ${NIX_CURRENT:-<not built yet>}"
@@ -278,7 +344,7 @@ if [ "$RUN_NIX" -eq 1 ] && [ "$PLATFORM" = linux ] && [ -f "$FLAKE_DIR/flake.nix
   fi
 fi
 [ "$RUN_SYNC" -eq 1 ] && log "  run sync-external-repos"
-if [ "$RUN_MISE" -eq 1 ] && [ -f "$PACKAGE_DIR/.config/mise/config.toml" ]; then
+if [ "$RUN_MISE" -eq 1 ] && [ -f "$MISE_CONFIG" ]; then
   if command -v mise >/dev/null 2>&1; then
     mise_missing="$(mise ls --missing 2>/dev/null | awk '{print $1" "$2}' | grep -v '^[[:space:]]*$' || true)"
     if [ -n "$mise_missing" ]; then
@@ -291,7 +357,7 @@ if [ "$RUN_MISE" -eq 1 ] && [ -f "$PACKAGE_DIR/.config/mise/config.toml" ]; then
     log "  mise not on PATH yet, will skip runtime install"
   fi
 fi
-if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = darwin ]; then
+if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = macos ]; then
   if [ -n "$BREW_MISSING" ]; then
     log "  brew bundle will install declared-but-absent package(s):"
     printf '%s\n' "$BREW_MISSING" | sed 's/^/        /'
@@ -304,7 +370,7 @@ if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = darwin ]; then
       log "  UNINSTALL $n package(s) installed but not declared in the Brewfile:"
     else
       log "  DRIFT: $n package(s) installed but not declared in the Brewfile"
-      log "         (add them to dev/Brewfile to keep them, or rerun with --prune)"
+      log "         (add them to manifests/macos/Brewfile to keep them, or rerun with --prune)"
     fi
     printf '%s\n' "$BREW_UNDECLARED" | sed 's/^/        /'
   else
@@ -376,8 +442,8 @@ if [ -n "$CONFLICTS" ]; then
   done
 fi
 
-log "==> stow -R $PACKAGE"
-if ! stow -v -R -d "$REPO_DIR" -t "$TARGET" "$PACKAGE"; then
+log "==> stow -R ${PACKAGES[*]}"
+if ! stow -v -R -d "$PACKAGES_DIR" -t "$TARGET" "${PACKAGES[@]}"; then
   fail "stow failed -- see $LOG_FILE"
   [ -d "$BACKUP_DIR" ] && fail "files backed up this run are in $BACKUP_DIR"
   exit 1
@@ -390,19 +456,19 @@ fi
 
 # Runtimes come after stow (which links the mise config into place) and
 # after brew would have installed mise itself on a fresh machine.
-if [ "$RUN_MISE" -eq 1 ] && [ -f "$PACKAGE_DIR/.config/mise/config.toml" ] \
+if [ "$RUN_MISE" -eq 1 ] && [ -f "$MISE_CONFIG" ] \
    && command -v mise >/dev/null 2>&1; then
   log "==> mise install"
   mise install || { fail "mise install failed"; exit 1; }
 fi
 
-if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = darwin ] && [ "$PRUNE" -eq 1 ] \
+if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = macos ] && [ "$PRUNE" -eq 1 ] \
    && [ -n "$BREW_UNDECLARED" ]; then
   # Failsafe: an unreadable or mis-parsed Brewfile yields an empty declared
   # set, which would make *everything installed* look like drift and prune
   # the whole account. Refuse to act on that rather than trust the diff.
   if [ -z "$(brew bundle list --formula --file="$BREWFILE" 2>/dev/null)" ]; then
-    fail "refusing to prune: dev/Brewfile declares no formulae (unreadable or empty?)"
+    fail "refusing to prune: manifests/macos/Brewfile declares no formulae (unreadable or empty?)"
     exit 1
   fi
   log "==> pruning undeclared packages"
@@ -416,9 +482,9 @@ if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = darwin ] && [ "$PRUNE" -eq 1 ] \
   done
 fi
 
-if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = darwin ] && [ -f "$PACKAGE_DIR/Brewfile" ]; then
+if [ "$RUN_BREW" -eq 1 ] && [ "$PLATFORM" = macos ] && [ -f "$BREWFILE" ]; then
   if command -v brew >/dev/null 2>&1; then
-    bundle_args=(--file="$PACKAGE_DIR/Brewfile")
+    bundle_args=(--file="$BREWFILE")
     [ "$NO_UPGRADE" -eq 1 ] && bundle_args+=(--no-upgrade)
     log "==> brew bundle ${bundle_args[*]}"
     brew bundle "${bundle_args[@]}" || { fail "brew bundle failed"; exit 1; }
@@ -431,7 +497,7 @@ fi
 # macOS only, for the same reason the bundle above is: the plugins it wires up
 # are Homebrew formulae, and on Linux docker's own packaging already puts
 # buildx and compose where the CLI looks for them.
-if [ "$PLATFORM" = darwin ] && [ -x "$TARGET/.local/bin/link-docker-cli-plugins" ]; then
+if [ "$PLATFORM" = macos ] && [ -x "$TARGET/.local/bin/link-docker-cli-plugins" ]; then
   log "==> link docker cli plugins"
   "$TARGET/.local/bin/link-docker-cli-plugins" || { fail "linking docker cli plugins failed"; exit 1; }
 fi
