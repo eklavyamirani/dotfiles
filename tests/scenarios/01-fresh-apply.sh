@@ -315,13 +315,23 @@ assert_file_has "a non-login shell loads the profile chain" "$nonlogin_out" '^LO
 assert_file_has "a non-login shell gets EDITOR"            "$nonlogin_out" '^EDITOR=nvim$'
 assert_file_has "a non-login shell gets ~/.local/bin"      "$nonlogin_out" "^PATH=.*$HOME/\.local/bin"
 
-# ...and a login shell must not do the work twice. The sentinel is exported so
-# .zshrc skips it, which also keeps subshells from re-running compinit and
-# `mise activate` on every prompt.
+# ...and a login shell must not do the work twice. Source .zshrc by hand in a
+# shell where zsh has already run .zprofile: the exported sentinel must make
+# that a no-op, which is what keeps compinit and `mise activate` from being
+# repeated in every subshell.
+#
+# Deliberately NOT "assert $PATH contains no duplicates at all". That was the
+# first version of this check and it is a much broader claim than the one being
+# tested -- macOS's /etc/zprofile runs path_helper, which duplicates entries
+# already present in PATH for reasons that have nothing to do with this
+# repository, so the assertion failed on the real macOS runner while passing
+# everywhere else. Compare PATH against itself across the re-source instead;
+# that is the property the sentinel actually provides, and it holds regardless
+# of what the OS put in PATH beforehand.
 dup_out="$SANDBOX/zprofile-dup.out"
-zsh -lc 'printf "%s\n" "$PATH" | tr ":" "\n" | sort | uniq -d | grep . && echo DUPLICATED || echo CLEAN' \
+zsh -lc 'before="$PATH"; source "$HOME/.zshrc"; [ "$PATH" = "$before" ] && echo GUARDED || echo REPEATED' \
   >"$dup_out" 2>&1 || true
-assert_file_has "a login shell does not source the profile twice" "$dup_out" '^CLEAN$'
+assert_file_has "re-sourcing .zshrc does not re-run the profile chain" "$dup_out" '^GUARDED$'
 
 # Whatever provided them, the tools this account pins must resolve inside
 # $HOME rather than to the distribution's or the system's copy -- that is what
