@@ -13,7 +13,9 @@
 # Export... (overwrite dev/.config/terminal/Claude-Dev.terminal) and commit.
 #
 # Only does anything when running inside Apple's Terminal.app — harmless
-# no-op in iTerm2/other terminals or non-interactive shells.
+# no-op in iTerm2/other terminals, in non-interactive shells, and on Linux
+# (where there is no Terminal.app and no osascript to drive it). COLORTERM
+# below is set everywhere; only the profile import is gated.
 
 export COLORTERM=truecolor
 

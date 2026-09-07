@@ -162,19 +162,74 @@ assert_file_has "and the step after it ran too" "$out" '==> the step after it'
 assert_exists "which really executed" "$MARKER"
 assert_file_has "the run completed" "$out" 'bootstrap complete'
 
+# --------------------------------------------------------------------------
+section "a step declaring another OS is skipped, and one declaring this OS runs"
+# --------------------------------------------------------------------------
+# The `os` field is what lets a single manifest describe both machines. It is
+# checked ahead of skip_if and state on purpose: a step for the other platform
+# may have predicates that cannot even be evaluated here (`brew shellenv` on
+# Linux), so the gate has to come first rather than fall out of a failing test.
+if [ "$PLATFORM" = darwin ]; then other_os=linux; else other_os=darwin; fi
+rm -f "$MARKER" "$MARKER.other"
+os_manifest="$(manifest os-gate <<JSON
+[
+  {
+    "name": "a step for this OS",
+    "os": "$PLATFORM",
+    "command": "touch \\"$MARKER\\""
+  },
+  {
+    "name": "a step for the other OS",
+    "os": "$other_os",
+    "command": "touch \\"$MARKER.other\\"",
+    "skip_if": "false",
+    "state": "false"
+  },
+  {
+    "name": "an ungated step",
+    "command": "touch \\"$MARKER.both\\""
+  }
+]
+JSON
+)"
+assert_true "bootstrap exits 0 with a mixed-OS manifest" run_bootstrap "$os_manifest"
+out="$BOOTSTRAP_OUT"
+assert_exists "the step for this OS ran" "$MARKER"
+assert_missing "the step for the other OS did not" "$MARKER.other"
+assert_exists "an ungated step runs on both" "$MARKER.both"
+assert_file_has "and says why it was skipped" "$out" \
+  "a step for the other OS \\(skipped, declared for $other_os, this is $PLATFORM\\)"
+# The gate must win over the predicates rather than race them: both are false
+# here, so a step evaluated in the wrong order would have run.
+assert_file_lacks "the other OS's predicates were never consulted" "$out" \
+  'a step for the other OS \(skipped, nothing to do\)'
+
 section "the shipping manifest still parses under the step contract"
 # Cheap guard against a manifest edit that adds an unknown field or renames one
-# of these: every step must have a name and a command, and the two predicate
-# fields must be the only other keys.
+# of these: every step must have a name and a command, and the predicate and
+# platform fields must be the only other keys.
 assert_true "bootstrap-steps.json matches the documented schema" python3 -c '
 import json, sys
 steps = json.load(open(sys.argv[1]))
-allowed = {"name", "command", "skip_if", "state", "purpose"}
+allowed = {"name", "command", "skip_if", "state", "purpose", "os"}
 for step in steps:
     assert step.get("name"), step
     assert step.get("command"), step
     extra = set(step) - allowed
     assert not extra, (step["name"], extra)
+    assert step.get("os") in (None, "darwin", "linux"), (step["name"], step.get("os"))
+' "$REPO/bootstrap-steps.json"
+
+# Both platforms must actually be served: a manifest whose every step is gated
+# to one OS would leave the other with nothing but the shared steps, which is
+# precisely the half-applied account the gate exists to avoid.
+assert_true "the manifest has steps for both platforms" python3 -c '
+import json, sys
+steps = json.load(open(sys.argv[1]))
+declared = {s.get("os") for s in steps if s.get("os")}
+assert declared == {"darwin", "linux"}, declared
+shared = [s["name"] for s in steps if not s.get("os")]
+assert shared, "no OS-independent steps left"
 ' "$REPO/bootstrap-steps.json"
 
 finish

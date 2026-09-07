@@ -22,6 +22,13 @@ dev/.config/*
 !dev/.config/mise/
 !dev/.config/mise/config.toml
 
+# Nix settings only (Linux). Deliberately narrow: nix.conf is the sole file
+# un-ignored here, because ~/.config/nix is also where `nix` writes
+# netrc-file paths and access tokens for private flake inputs -- exactly the
+# kind of thing this allowlist exists to keep out.
+!dev/.config/nix/
+!dev/.config/nix/nix.conf
+
 # Pi agent runtime state may contain credentials, downloaded binaries,
 # session history, caches, and machine-local UI settings.
 dev/.pi/agent/*

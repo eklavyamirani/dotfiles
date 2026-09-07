@@ -6,11 +6,24 @@
 # (Homebrew and the external nvim config). Everything a scenario touches lives
 # under that directory, so scenarios never see each other's state and the whole
 # suite runs offline.
+#
+# The suite runs on both platforms the dotfiles target, and bootstrap.sh's
+# manifest gates its package-manager steps on the OS, so the sandbox stands up
+# whichever manager this machine's run will actually reach for: the Homebrew
+# stub on macOS, the Nix stub on Linux. $PLATFORM below is the same value
+# bootstrap.sh and reapply.sh compute for themselves, so a scenario branching
+# on it is branching the way the code under test just did.
 
 set -uo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_REPO="${SOURCE_REPO:-$(cd "$TESTS_DIR/.." && pwd)}"
+
+case "$(uname -s)" in
+  Darwin) PLATFORM=darwin ;;
+  *)      PLATFORM=linux ;;
+esac
+export PLATFORM
 
 CHECKS=0
 FAILURES=0
@@ -102,9 +115,14 @@ sandbox_create() {
   export ORIGINS="$SANDBOX/origins"
   export BREW_CALL_LOG="$SANDBOX/brew-calls.log"
   export BREW_SHIM_LOG="$SANDBOX/shim-calls.log"
+  export NIX_CALL_LOG="$SANDBOX/nix-calls.log"
+  export NIX_SHIM_LOG="$SANDBOX/nix-shim-calls.log"
+  export NIX_STORE_ROOT="$SANDBOX/nix-store"
+  export NIX_ENV="$HOME/.local/state/dotfiles/nix-env"
   REPO="$HOME/dotfiles"
-  mkdir -p "$HOME" "$ORIGINS"
+  mkdir -p "$HOME" "$ORIGINS" "$NIX_STORE_ROOT"
   : >"$BREW_CALL_LOG"
+  : >"$NIX_CALL_LOG"
 
   # Safety net. bootstrap.sh calls plain `brew` after loading the stub's
   # shellenv; if that eval ever fails, PATH still holds the developer's (or the
@@ -119,6 +137,20 @@ printf 'The sandbox stub should have been on PATH first -- refusing.\n' >&2
 exit 127
 GUARD
   chmod +x "$SANDBOX/guardbin/brew"
+
+  # The same safety net for Nix, and it matters more here than for brew: a
+  # developer running this suite on Linux very likely has a real Nix, and a
+  # leaked `nix build` would reach the network the container job forbids and
+  # write into the real /nix store.
+  cat >"$SANDBOX/guardbin/nix" <<'GUARD'
+#!/bin/sh
+printf 'test guard: the real nix was invoked (%s).\n' "$*" >&2
+printf 'The sandbox stub should have been on PATH first -- refusing.\n' >&2
+exit 127
+GUARD
+  chmod +x "$SANDBOX/guardbin/nix"
+
+  sandbox_seed_nix
 
   git config --global user.name  'Dotfiles CI'
   git config --global user.email 'ci@example.invalid'
@@ -135,6 +167,31 @@ GUARD
   git config --global "url.file://$ORIGINS/nvim-config.insteadOf" 'https://github.com/eklavyamirani/nvim-config'
 
   sandbox_checkout_repo
+}
+
+# Stand in for bootstrap's "install Nix (single-user)" step.
+#
+# That step is the one thing here that cannot be faked by rewriting a git URL
+# the way the Homebrew clone is: it is `curl https://nixos.org/nix/install |
+# sh`, which needs the network and would create a real /nix using sudo. So the
+# sandbox produces the state that step declares instead -- a profile script at
+# ~/.nix-profile/etc/profile.d/nix.sh -- and the runner then skips the step
+# through its own `state` predicate, which is itself worth exercising.
+#
+# The limitation is deliberate and documented in tests/README.md: the
+# installer's own command line is never executed by the suite. Everything
+# downstream of it -- loading the profile, building the flake, the out-link,
+# the PATH ordering in 45-nix.zsh -- runs for real against the stub.
+sandbox_seed_nix() {
+  local profile_dir="$HOME/.nix-profile/etc/profile.d"
+  mkdir -p "$profile_dir" "$HOME/.nix-profile/bin"
+  ln -sfn "$TESTS_DIR/stubs/nix/bin/nix" "$HOME/.nix-profile/bin/nix"
+  cat >"$profile_dir/nix.sh" <<'PROFILE'
+# Stand-in for the profile script a single-user Nix install writes. It mirrors
+# the one thing about the real script these tests depend on: it puts nix on
+# PATH, ahead of the guard that would otherwise refuse the call.
+export PATH="$HOME/.nix-profile/bin:$PATH"
+PROFILE
 }
 
 sandbox_destroy() {
@@ -216,6 +273,12 @@ run_reapply() { # extra reapply.sh arguments
   # suite natively on a Mac leaves the developer's own prefix in the
   # environment, and link-docker-cli-plugins would then wire the sandbox's
   # plugin directory to the real Homebrew instead of the stub.
+  #
+  # No Nix equivalent is needed: reapply.sh sources
+  # $HOME/.nix-profile/etc/profile.d/nix.sh itself, and $HOME is the sandbox,
+  # so it finds the stub before the guard either way. That self-hosting is
+  # exactly what makes reapply runnable from a non-login shell on Linux, so
+  # letting it happen here tests it rather than papering over it.
   ( cd "$REPO" && env -u HOMEBREW_PREFIX -u HOMEBREW_CELLAR -u HOMEBREW_REPOSITORY \
       PATH="$HOME/.homebrew/bin:$SANDBOX/guardbin:$PATH" \
       ./reapply.sh --yes "$@" ) >"$REAPPLY_OUT" 2>&1 || status=$?
@@ -271,7 +334,14 @@ inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1"; }
 home_link_snapshot() {
   # `find -printf` is GNU-only; readlink per link keeps this working on the
   # macOS runner too.
+  #
+  # The two Nix paths are pruned for the same reason ~/.homebrew is: they are
+  # the package manager's own state, not something stow deployed. The out-link
+  # in particular is *expected* to be repointed whenever nix/flake.nix changes,
+  # so leaving it in would make "no previously deployed link was repointed"
+  # fail on exactly the runs that are working correctly.
   find "$HOME" -path "$HOME/dotfiles" -prune -o -path "$HOME/.homebrew" -prune -o \
+       -path "$HOME/.nix-profile" -prune -o -path "$NIX_ENV" -prune -o \
        -path "$HOME/.config/nvim" -prune -o -type l -print 2>/dev/null |
     while IFS= read -r link; do
       printf '%s -> %s\n' "${link#"$HOME"/}" "$(readlink "$link")"

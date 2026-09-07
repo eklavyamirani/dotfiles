@@ -55,8 +55,18 @@ diskcheck() {
     return 2
   fi
 
-  echo "Mac storage:"
-  df -h /System/Volumes/Data | awk 'NR == 1 || NR == 2'
+  # macOS reports the real user-data capacity for the synthesised
+  # /System/Volumes/Data volume, not for /; on Linux the root filesystem is
+  # the honest answer and that path does not exist at all.
+  local storage_volume="/"
+  local storage_label="Disk storage"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    storage_volume="/System/Volumes/Data"
+    storage_label="Mac storage"
+  fi
+
+  echo "$storage_label:"
+  df -h "$storage_volume" | awk 'NR == 1 || NR == 2'
 
   echo
   echo "Largest folders in $target:"

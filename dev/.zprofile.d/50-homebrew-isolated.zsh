@@ -1,35 +1,45 @@
 # Isolated Homebrew for this (non-admin) dev account: installed to ~/.homebrew
 # via git clone, entirely separate from any admin account's /opt/homebrew or
 # /usr/local Homebrew. No sudo required to install or use.
-eval "$(~/.homebrew/bin/brew shellenv)"
+#
+# macOS only. On Linux this account's package manager is Nix (see
+# nix/flake.nix and 45-nix.zsh, which runs just before this file for the
+# same reason this one runs before 55-mise.zsh: whichever manager provides
+# mise has to reach PATH first). Guarding on $OSTYPE rather than on the
+# existence of ~/.homebrew is deliberate -- a stray empty ~/.homebrew on a
+# Linux box would otherwise make `eval "$(~/.homebrew/bin/brew shellenv)"`
+# fail on every single login shell.
+if [[ "$OSTYPE" == darwin* ]]; then
+  eval "$(~/.homebrew/bin/brew shellenv)"
 
-# Add Homebrew's completions to the shell path
-if type brew &>/dev/null; then
-  FPATH=$(brew --prefix)/share/zsh/site-functions:$FPATH
-  autoload -Uz compinit
-  compinit
-fi
-
-# Pin 'brew' to this account's Homebrew regardless of PATH ordering (defense in
-# depth on top of the tripwire below — functions can't be shadowed by PATH the
-# way plain commands can, only by explicit 'command brew').
-brew() { "$HOME/.homebrew/bin/brew" "$@"; }
-
-# --- Homebrew isolation tripwire ---
-# Warns (doesn't block) if the real 'brew' binary on PATH (ignoring the pinning
-# function above) ever resolves outside this account's home directory. That
-# would mean some other Homebrew install (an admin account's /opt/homebrew or
-# /usr/local, for example) has leaked onto this account's PATH.
-_brew_isolation_check() {
-  local resolved="$(whence -p brew 2>/dev/null)"
-  if [[ -n "$resolved" && "$resolved" != "$HOME"/* ]]; then
-    print -P "%F{red}⚠ WARNING: real 'brew' on PATH resolves to $resolved, outside \$HOME. Homebrew isolation may be broken.%f"
+  # Add Homebrew's completions to the shell path
+  if type brew &>/dev/null; then
+    FPATH=$(brew --prefix)/share/zsh/site-functions:$FPATH
+    autoload -Uz compinit
+    compinit
   fi
-  local other_prefix
-  for other_prefix in /opt/homebrew /usr/local/Homebrew; do
-    if [[ -d "$other_prefix" && -w "$other_prefix" ]]; then
-      print -P "%F{red}⚠ WARNING: $other_prefix is writable by this account. Another account's Homebrew should stay isolated.%f"
+
+  # Pin 'brew' to this account's Homebrew regardless of PATH ordering (defense in
+  # depth on top of the tripwire below — functions can't be shadowed by PATH the
+  # way plain commands can, only by explicit 'command brew').
+  brew() { "$HOME/.homebrew/bin/brew" "$@"; }
+
+  # --- Homebrew isolation tripwire ---
+  # Warns (doesn't block) if the real 'brew' binary on PATH (ignoring the pinning
+  # function above) ever resolves outside this account's home directory. That
+  # would mean some other Homebrew install (an admin account's /opt/homebrew or
+  # /usr/local, for example) has leaked onto this account's PATH.
+  _brew_isolation_check() {
+    local resolved="$(whence -p brew 2>/dev/null)"
+    if [[ -n "$resolved" && "$resolved" != "$HOME"/* ]]; then
+      print -P "%F{red}⚠ WARNING: real 'brew' on PATH resolves to $resolved, outside \$HOME. Homebrew isolation may be broken.%f"
     fi
-  done
-}
-_brew_isolation_check
+    local other_prefix
+    for other_prefix in /opt/homebrew /usr/local/Homebrew; do
+      if [[ -d "$other_prefix" && -w "$other_prefix" ]]; then
+        print -P "%F{red}⚠ WARNING: $other_prefix is writable by this account. Another account's Homebrew should stay isolated.%f"
+      fi
+    done
+  }
+  _brew_isolation_check
+fi
