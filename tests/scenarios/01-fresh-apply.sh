@@ -333,11 +333,30 @@ zsh -lc 'before="$PATH"; source "$HOME/.zshrc"; [ "$PATH" = "$before" ] && echo 
   >"$dup_out" 2>&1 || true
 assert_file_has "re-sourcing .zshrc does not re-run the profile chain" "$dup_out" '^GUARDED$'
 
-# Whatever provided them, the tools this account pins must resolve inside
-# $HOME rather than to the distribution's or the system's copy -- that is what
-# 55-mise.zsh's precedence tripwire exists to catch, and it is the one
-# assertion that means the same thing on both platforms.
-assert_file_lacks "no pinned tool is shadowed from outside \$HOME" "$zsh_out" 'is being shadowed'
+# 55-mise.zsh's precedence tripwire warns when a tool this account pins
+# resolves outside $HOME -- to /usr/bin, or to another account's Homebrew --
+# because the pinned version is then being shadowed.
+#
+# Which way it should behave depends on the machine, exactly like the Homebrew
+# isolation tripwire above, so ask the environment rather than assume. mise is
+# STUBBED here and installs nothing, so on a host that already ships any of
+# these tools the warning is correct and expected: GitHub's macOS runners
+# preinstall gh, while the Linux container has none of them. Asserting silence
+# unconditionally passed in the container and failed on the real macOS runner
+# -- and it was testing the environment, not the tripwire.
+shadowed_tool=0
+for pinned_tool in nvim rg gh tmux; do
+  resolved_tool="$(command -v "$pinned_tool" 2>/dev/null || true)"
+  case "$resolved_tool" in
+    ''|"$HOME"/*) ;;
+    *) shadowed_tool=1 ;;
+  esac
+done
+if [ "$shadowed_tool" = 1 ]; then
+  assert_file_has "tripwire warns that a pinned tool is shadowed" "$zsh_out" 'is being shadowed'
+else
+  assert_file_lacks "no pinned tool is shadowed from outside \$HOME" "$zsh_out" 'is being shadowed'
+fi
 
 # --------------------------------------------------------------------------
 section "the package split itself is sound"
