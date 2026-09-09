@@ -1,7 +1,10 @@
 # Container the apply scenarios run in: a bare Linux account with only the
 # things a fresh machine already has (git, python3, a shell), plus stow and zsh,
-# which bootstrap.sh would otherwise install through Homebrew. Homebrew itself
-# is stubbed (tests/stubs/homebrew) -- see tests/README.md.
+# which bootstrap.sh would otherwise install through this platform's package
+# manager. Both managers are stubbed (tests/stubs/homebrew, tests/stubs/nix) --
+# see tests/README.md. On Linux the scenarios take the Nix branch of
+# manifests/common/bootstrap-steps.json, so it is the Nix stub that does the work here; the
+# Homebrew stub is exercised by the macOS runner.
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive

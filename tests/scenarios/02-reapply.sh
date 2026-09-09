@@ -10,8 +10,16 @@
 # managed file, a new Brewfile entry and a new external repo, while the external
 # repo's remote moves forward. On top of that it exercises the reconciliation
 # reapply.sh exists for and bootstrap cannot do: pruning links stranded by an
-# upstream rename, reporting Homebrew drift, removing undeclared packages only
-# when asked, and moving a conflicting real file aside instead of clobbering it.
+# upstream rename, reporting package-manager drift, removing undeclared
+# packages only when asked, and moving a conflicting real file aside instead of
+# clobbering it.
+#
+# The package-manager half branches on $PLATFORM, matching the branch
+# reapply.sh itself takes: on macOS drift means the Brewfile versus what brew
+# has installed, and pruning is opt-in via --prune; on Linux the environment is
+# rebuilt whole from manifests/linux/flake.nix, so a deleted line is already a removal and
+# drift is a store-path comparison. Everything else -- stow, external repos,
+# mise, backups, the rename case -- is asserted identically on both.
 
 CURRENT_SCENARIO="02-reapply"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/harness.sh"
@@ -31,7 +39,11 @@ assert_true "baseline cloned the nvim config" test -d "$HOME/.config/nvim/.git"
 links_before="$(home_link_snapshot)"
 zshrc_inode_before="$(inode "$HOME/.zshrc")"
 nvim_root_before="$(git -C "$HOME/.config/nvim" rev-list --max-parents=0 HEAD)"
-brew_clone_before="$(git -C "$HOME/.homebrew" rev-parse HEAD)"
+if [ "$PLATFORM" = macos ]; then
+  brew_clone_before="$(git -C "$HOME/.homebrew" rev-parse HEAD)"
+else
+  nix_env_before="$(readlink "$NIX_ENV")"
+fi
 
 # User state that lives in stow-managed directories must survive a re-apply.
 printf '{"session":"keep me"}\n' >"$HOME/.pi/agent/runtime-state.json"
@@ -40,30 +52,39 @@ printf '{"session":"keep me"}\n' >"$HOME/.pi/agent/runtime-state.json"
 section "change the configuration the way a real update would"
 # --------------------------------------------------------------------------
 # A new profile snippet in an existing managed directory.
-cat >"$REPO/dev/.zprofile.d/40-ci-added-snippet.zsh" <<'EOF'
+cat >"$REPO/packages/unix/.zprofile.d/40-ci-added-snippet.zsh" <<'EOF'
 export DOTFILES_CI_ADDED_SNIPPET=1
 EOF
 
 # A new file in a new *nested* managed directory (exercises prepare-stow-targets
 # on a rerun: without it, stow would fold ~/.claude/skills/ci-demo into the repo).
-mkdir -p "$REPO/dev/.claude/skills/ci-demo"
-printf '# CI demo skill\n' >"$REPO/dev/.claude/skills/ci-demo/SKILL.md"
+mkdir -p "$REPO/packages/common/.claude/skills/ci-demo"
+printf '# CI demo skill\n' >"$REPO/packages/common/.claude/skills/ci-demo/SKILL.md"
 
 # A new top-level managed directory.
-mkdir -p "$REPO/dev/.newtool"
-printf 'answer = 42\n' >"$REPO/dev/.newtool/config.ini"
+mkdir -p "$REPO/packages/common/.newtool"
+printf 'answer = 42\n' >"$REPO/packages/common/.newtool/config.ini"
 
 # An edit to an already-deployed file.
-printf '\n# added by the CI reapply scenario\nexport DOTFILES_CI_ZSHRC_EDIT=1\n' >>"$REPO/dev/.zshrc"
+printf '\n# added by the CI reapply scenario\nexport DOTFILES_CI_ZSHRC_EDIT=1\n' >>"$REPO/packages/unix/.zshrc"
 
-# A new Brewfile entry.
-printf '\nbrew "jq"           # added by the CI reapply scenario\n' >>"$REPO/dev/Brewfile"
+# A new package in this platform's manifest. Both are appended regardless of
+# which one this run will apply -- a real commit would ship both files too, and
+# it keeps the repository state identical on the two runners.
+printf '\nbrew "jq"           # added by the CI reapply scenario\n' >>"$REPO/manifests/macos/Brewfile"
+python3 - "$REPO/manifests/linux/flake.nix" <<'EOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+marker = "            zsh # the login shell these dotfiles configure\n"
+assert marker in s, "flake.nix package list no longer matches what this scenario patches"
+p.write_text(s.replace(marker, marker + "            jq # added by the CI reapply scenario\n"))
+EOF
 
 # A second external repo in the manifest, plus a new upstream commit in the
 # first one, so this run both clones and fast-forwards.
 origin_new ci-extra-repo
 git config --global "url.file://$ORIGINS/ci-extra-repo.insteadOf" 'https://github.com/eklavyamirani/ci-extra-repo'
-python3 - "$REPO/dev/.config/external-repos.json" <<'EOF'
+python3 - "$REPO/packages/common/.config/external-repos.json" <<'EOF'
 import json, sys
 path = sys.argv[1]
 entries = json.load(open(path))
@@ -83,6 +104,7 @@ git -C "$REPO" add -A
 git -C "$REPO" commit --quiet -m 'CI: new snippet, new dirs, new Brewfile entry, new external repo'
 repo_after_change="$(repo_tree_snapshot)"
 bundle_calls_before="$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
+nix_builds_before="$(grep -c ' build --out-link ' "$NIX_CALL_LOG")"
 
 # --------------------------------------------------------------------------
 section "re-apply onto the existing configuration"
@@ -94,22 +116,30 @@ assert_file_has "prints a plan before acting" "$out" '^\[[^]]*\] PLAN$'
 assert_file_has "logs its transcript path" "$out" 'transcript: .*/reapply-[0-9]+-[0-9]+\.log'
 
 section "every reconcile step runs"
-assert_file_has "stow re-ran" "$out" '==> stow -R dev'
+assert_file_has "stow re-ran" "$out" '==> stow -R common unix'
 assert_file_has "external repo sync ran" "$out" '==> sync-external-repos'
-assert_file_has "brew bundle ran" "$out" '==> brew bundle'
-assert_file_has "docker cli plugins were wired" "$out" '==> link docker cli plugins'
-assert_file_lacks "reapply does not reinstall Homebrew" "$out" 'install Homebrew'
-assert_eq "existing ~/.homebrew checkout untouched" \
-  "$brew_clone_before" "$(git -C "$HOME/.homebrew" rev-parse HEAD)"
+if [ "$PLATFORM" = macos ]; then
+  assert_file_has "brew bundle ran" "$out" '==> brew bundle'
+  assert_file_has "docker cli plugins were wired" "$out" '==> link docker cli plugins'
+  assert_file_lacks "reapply does not reinstall Homebrew" "$out" 'install Homebrew'
+  assert_eq "existing ~/.homebrew checkout untouched" \
+    "$brew_clone_before" "$(git -C "$HOME/.homebrew" rev-parse HEAD)"
+else
+  assert_file_has "the Nix environment was rebuilt" "$out" '==> nix build '
+  assert_file_lacks "reapply does not run brew on Linux" "$out" '==> brew bundle'
+  assert_file_lacks "and does not wire Homebrew's docker plugins on Linux" \
+    "$out" '==> link docker cli plugins'
+  assert_file_lacks "reapply does not reinstall Nix" "$out" 'install Nix'
+fi
 
 section "new configuration is deployed"
 assert_symlink_to "new snippet linked" \
-  "$HOME/.zprofile.d/40-ci-added-snippet.zsh" "$REPO/dev/.zprofile.d/40-ci-added-snippet.zsh"
+  "$HOME/.zprofile.d/40-ci-added-snippet.zsh" "$REPO/packages/unix/.zprofile.d/40-ci-added-snippet.zsh"
 assert_symlink_to "new nested file linked" \
-  "$HOME/.claude/skills/ci-demo/SKILL.md" "$REPO/dev/.claude/skills/ci-demo/SKILL.md"
+  "$HOME/.claude/skills/ci-demo/SKILL.md" "$REPO/packages/common/.claude/skills/ci-demo/SKILL.md"
 assert_real_dir "new nested directory is real, not folded" "$HOME/.claude/skills/ci-demo"
 assert_symlink_to "new top-level file linked" \
-  "$HOME/.newtool/config.ini" "$REPO/dev/.newtool/config.ini"
+  "$HOME/.newtool/config.ini" "$REPO/packages/common/.newtool/config.ini"
 assert_real_dir "new top-level directory is real, not folded" "$HOME/.newtool"
 assert_true "new snippet is picked up by the profile loader" \
   bash -c 'zsh -c "source \"$HOME/.zprofile\"; [ \"\$DOTFILES_CI_ADDED_SNIPPET\" = 1 ]"'
@@ -133,20 +163,42 @@ assert_true "newly listed repo was cloned" test -d "$HOME/.local/share/ci-extra-
 assert_eq "newly listed repo is at its tip" \
   "$(origin_head ci-extra-repo)" "$(git -C "$HOME/.local/share/ci-extra-tool" rev-parse HEAD 2>/dev/null)"
 
+if [ "$PLATFORM" = macos ]; then
 section "new Brewfile entry is installed"
 assert_file_has "reapply planned the missing package" "$out" 'brew bundle will install declared-but-absent'
 assert_file_has "brew bundle saw the new entry" "$HOME/.homebrew/bundled.txt" '^jq$'
 assert_eq "brew bundle ran exactly once more" \
   "$((bundle_calls_before + 1))" "$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
+else
+section "new flake entry is installed"
+# The drift check reads the manifest, so editing manifests/linux/flake.nix must be enough
+# on its own: the plan names the change before acting, and the rebuild moves
+# the out-link to a different store path.
+assert_file_has "reapply planned the rebuild" "$out" 'rebuild the Nix environment'
+assert_file_has "the plan showed what it was rebuilding from" "$out" 'from: '
+assert_true "the new package is in the environment" test -x "$NIX_ENV/bin/jq"
+assert_eq "nix build ran exactly once more" \
+  "$((nix_builds_before + 1))" "$(grep -c ' build --out-link ' "$NIX_CALL_LOG")"
+assert_false "the out-link moved to a new store path" \
+  test "$nix_env_before" = "$(readlink "$NIX_ENV")"
+fi
 
 section "runtimes and docker plugins are reconciled too"
-assert_file_has "mise was asked to install the pinned runtimes" "$BREW_SHIM_LOG" '^mise install$'
-for plugin in docker-buildx docker-compose; do
-  assert_symlink_to "docker plugin wired: $plugin" \
-    "$HOME/.docker/cli-plugins/$plugin" "$HOME/.homebrew/bin/$plugin"
-done
-assert_missing "the docker binary itself is not linked as a plugin" \
-  "$HOME/.docker/cli-plugins/docker"
+if [ "$PLATFORM" = macos ]; then MISE_SHIM_LOG="$BREW_SHIM_LOG"; else MISE_SHIM_LOG="$NIX_SHIM_LOG"; fi
+assert_file_has "mise was asked to install the pinned runtimes" "$MISE_SHIM_LOG" '^mise install$'
+if [ "$PLATFORM" = macos ]; then
+  for plugin in docker-buildx docker-compose; do
+    assert_symlink_to "docker plugin wired: $plugin" \
+      "$HOME/.docker/cli-plugins/$plugin" "$HOME/.homebrew/bin/$plugin"
+  done
+  assert_missing "the docker binary itself is not linked as a plugin" \
+    "$HOME/.docker/cli-plugins/docker"
+else
+  # The plugins are Homebrew formulae; on Linux the step is gated off entirely,
+  # so nothing should have been wired into the docker plugin directory.
+  assert_missing "no docker plugin directory is created on Linux" \
+    "$HOME/.docker/cli-plugins/docker-buildx"
+fi
 
 section "re-apply still does not write into the repository"
 assert_eq "repository tree unchanged by the re-apply" "$repo_after_change" "$(repo_tree_snapshot)"
@@ -159,7 +211,14 @@ links_settled="$(home_link_snapshot)"
 assert_true "repeat reapply exits 0" run_reapply
 assert_eq "deployed links are byte-identical" "$links_settled" "$(home_link_snapshot)"
 assert_file_has "reports no dangling links to remove" "$REAPPLY_OUT" 'no dangling symlinks to remove'
-assert_file_has "reports no Homebrew drift" "$REAPPLY_OUT" 'no Homebrew drift'
+if [ "$PLATFORM" = macos ]; then
+  assert_file_has "reports no Homebrew drift" "$REAPPLY_OUT" 'no Homebrew drift'
+else
+  # The point of the drift comparison: an unchanged manifest must evaluate to
+  # the store path already linked, so a no-op run says so instead of rebuilding.
+  assert_file_has "reports no Nix drift" "$REAPPLY_OUT" 'no Nix drift'
+  assert_file_lacks "and did not rebuild" "$REAPPLY_OUT" 'rebuild the Nix environment'
+fi
 assert_eq "nvim clone stays at the same commit" \
   "$nvim_target" "$(git -C "$HOME/.config/nvim" rev-parse HEAD)"
 assert_eq "repository still clean" "" "$(git -C "$REPO" status --porcelain)"
@@ -170,7 +229,7 @@ section "a file renamed upstream leaves no dangling link behind"
 # The reason reapply.sh exists. `stow -R` unstows using the package's CURRENT
 # contents, so a renamed file's old link survives, pointing at nothing -- and
 # .zprofile globs .zprofile.d/*.zsh, so one stale link breaks every new shell.
-git -C "$REPO" mv dev/.zprofile.d/40-ci-added-snippet.zsh dev/.zprofile.d/45-ci-renamed-snippet.zsh
+git -C "$REPO" mv packages/unix/.zprofile.d/40-ci-added-snippet.zsh packages/unix/.zprofile.d/45-ci-renamed-snippet.zsh
 git -C "$REPO" commit --quiet -m 'CI: rename a snippet, as an upstream change would'
 
 assert_true "link to the pre-rename name still exists before reapply" \
@@ -180,9 +239,47 @@ assert_file_has "reports the stale link it removed" "$REAPPLY_OUT" \
   'removed dangling link: .*/\.zprofile\.d/40-ci-added-snippet\.zsh'
 assert_missing "the stale link is gone" "$HOME/.zprofile.d/40-ci-added-snippet.zsh"
 assert_symlink_to "the renamed file is linked under its new name" \
-  "$HOME/.zprofile.d/45-ci-renamed-snippet.zsh" "$REPO/dev/.zprofile.d/45-ci-renamed-snippet.zsh"
+  "$HOME/.zprofile.d/45-ci-renamed-snippet.zsh" "$REPO/packages/unix/.zprofile.d/45-ci-renamed-snippet.zsh"
 assert_true "a login shell still works after the rename" \
   bash -c 'zsh -c "source \"$HOME/.zprofile\"; [ \"\$DOTFILES_CI_ADDED_SNIPPET\" = 1 ]"'
+
+# --------------------------------------------------------------------------
+section "a whole directory vanishing upstream is still reclaimed"
+# --------------------------------------------------------------------------
+# The rename case above only removes a FILE, so the link's parent directory
+# still exists and resolving the target through it works. Splitting the single
+# `dev` package into packages/{common,unix,macos,linux} deleted a whole
+# directory, and every deployed link's parent went with it -- at which point
+# the `cd` used to resolve the target failed, the scan skipped those links
+# entirely, and stow then reported them as conflicts that the backup step
+# refused to move (they are symlinks, not real files). The re-apply had no way
+# to make progress. This is that shape, in miniature.
+git -C "$REPO" mv packages/common/.newtool packages/common/.newtool-renamed
+git -C "$REPO" commit --quiet -m 'CI: move a whole managed directory, as the package split did'
+
+assert_true "the link into the now-missing directory still exists" \
+  test -L "$HOME/.newtool/config.ini"
+assert_false "and its target really is gone" test -e "$HOME/.newtool/config.ini"
+assert_true "reapply after a directory move exits 0" run_reapply
+assert_file_has "reports the stale link it removed" "$REAPPLY_OUT" \
+  'removed dangling link: .*/\.newtool/config\.ini'
+assert_missing "the stale link is gone" "$HOME/.newtool/config.ini"
+assert_symlink_to "the moved file is linked under its new path" \
+  "$HOME/.newtool-renamed/config.ini" "$REPO/packages/common/.newtool-renamed/config.ini"
+
+section "the plan describes the outcome, not stow's scratch work"
+# stow's dry run narrates actions it later cancels, and the
+# "(reverts previous action)" marker lands on the CANCELLING line, not the
+# cancelled one. With several packages contributing to one directory it
+# proposes folding ~/.zprofile.d into a single link into one package, reverts
+# that twice, then settles on a real directory. Reporting the phantom folds
+# told the user their entire snippet directory was about to collapse. The plan
+# is what gets approved, so it must not contain actions that never happen.
+assert_true "reapply exits 0 on a settled tree" run_reapply --dry-run
+assert_file_has "a settled tree plans no new links" "$REAPPLY_OUT" 'no new links to create'
+assert_file_lacks "no phantom fold of the snippet directory" "$REAPPLY_OUT" \
+  'LINK: \.zprofile\.d =>'
+assert_real_dir "and it is still a real directory" "$HOME/.zprofile.d"
 
 section "links that are not this repository's business are left alone"
 mkdir -p "$HOME/.zprofile.d"
@@ -193,6 +290,17 @@ assert_file_lacks "reapply did not claim to remove it" "$REAPPLY_OUT" '99-foreig
 rm -f "$HOME/.zprofile.d/99-foreign.zsh"
 
 # --------------------------------------------------------------------------
+# Drift: what is installed but not declared. The two managers answer this
+# question in structurally different ways, so the sections are separate rather
+# than forced into one shape.
+#
+#   macOS: `brew install` mutates a shared prefix, so an undeclared package
+#          lingers until something removes it -- hence reporting, and --prune.
+#   Linux: the environment is rebuilt whole from the flake, so "installed but
+#          not declared" cannot persist: dropping the line is the removal.
+#          There is nothing to prune, and no --prune to test.
+# --------------------------------------------------------------------------
+if [ "$PLATFORM" = macos ]; then
 section "a package installed out of band is reported, and removed only on --prune"
 # --------------------------------------------------------------------------
 "$HOME/.homebrew/bin/brew" install straggler >/dev/null 2>&1
@@ -213,7 +321,7 @@ section "declared packages are never pruned"
 while read -r pkg; do
   assert_file_lacks "declared package not uninstalled: $pkg" \
     "$HOME/.homebrew/uninstalled.txt" "^${pkg}$"
-done < <(sed -e 's/#.*$//' "$REPO/dev/Brewfile" |
+done < <(sed -e 's/#.*$//' "$REPO/manifests/macos/Brewfile" |
            sed -n -E 's/^[[:space:]]*brew[[:space:]]+"([^"]+)".*/\1/p' | head -5)
 
 # --------------------------------------------------------------------------
@@ -223,16 +331,36 @@ section "--prune refuses to act on a Brewfile it cannot read"
 # undeclared. Pruning on that would wipe the account, so it must refuse.
 "$HOME/.homebrew/bin/brew" install another-straggler >/dev/null 2>&1
 installed_before_guard="$(sort "$HOME/.homebrew/installed.txt")"
-cp "$REPO/dev/Brewfile" "$SANDBOX/Brewfile.bak"
-: >"$REPO/dev/Brewfile"
+cp "$REPO/manifests/macos/Brewfile" "$SANDBOX/Brewfile.bak"
+: >"$REPO/manifests/macos/Brewfile"
 
 assert_false "reapply --prune exits non-zero on an empty Brewfile" run_reapply --prune
 assert_file_has "says why it refused" "$REAPPLY_OUT" 'refusing to prune'
 assert_eq "nothing was uninstalled" \
   "$installed_before_guard" "$(sort "$HOME/.homebrew/installed.txt")"
 
-cp "$SANDBOX/Brewfile.bak" "$REPO/dev/Brewfile"
+cp "$SANDBOX/Brewfile.bak" "$REPO/manifests/macos/Brewfile"
 run_reapply --prune >/dev/null 2>&1 || true   # settle: drop the straggler again
+
+else
+section "on Linux, deleting a line from the flake is the removal"
+# The Homebrew equivalent of this needs an explicit --prune; here the rebuild
+# does it, which is the property worth pinning down.
+python3 - "$REPO/manifests/linux/flake.nix" <<'EOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+marker = "            jq # added by the CI reapply scenario\n"
+assert marker in s, "the scenario's own flake edit is missing"
+p.write_text(s.replace(marker, ""))
+EOF
+assert_true "the package is present before the removal" test -x "$NIX_ENV/bin/jq"
+assert_true "reapply after deleting the line exits 0" run_reapply
+assert_file_has "planned a rebuild for the removal" "$REAPPLY_OUT" 'rebuild the Nix environment'
+assert_missing "the package is gone from the environment" "$NIX_ENV/bin/jq"
+assert_true "the packages still declared survived" test -x "$NIX_ENV/bin/stow"
+assert_file_lacks "no --prune advice on Linux, because none is needed" \
+  "$REAPPLY_OUT" 'rerun with --prune'
+fi
 
 # --------------------------------------------------------------------------
 section "a re-apply that cannot fast-forward fails loudly and changes nothing"
@@ -240,7 +368,12 @@ section "a re-apply that cannot fast-forward fails loudly and changes nothing"
 printf '\n-- local edit the user has not committed\n' >>"$HOME/.config/nvim/init.lua"
 nvim_local_sum="$(cksum <"$HOME/.config/nvim/init.lua")"
 origin_commit nvim-config init.lua '-- upstream moved again, conflicting'
-bundle_calls_before="$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
+# sync-external-repos runs before mise on both platforms, so counting mise
+# invocations proves the halt actually stopped the run rather than merely
+# logging. (On macOS `brew bundle` is later still; either is a valid witness,
+# but mise is the first step after the failure on both.)
+if [ "$PLATFORM" = macos ]; then MISE_SHIM_LOG="$BREW_SHIM_LOG"; else MISE_SHIM_LOG="$NIX_SHIM_LOG"; fi
+mise_calls_before="$(grep -c '^mise install$' "$MISE_SHIM_LOG" 2>/dev/null || echo 0)"
 
 assert_false "reapply exits non-zero when a repo cannot be fast-forwarded" run_reapply
 out="$REAPPLY_OUT"
@@ -248,7 +381,7 @@ assert_file_has "names the repo that failed" "$out" 'pull failed for .*/\.config
 assert_file_lacks "does not report completion" "$out" 're-apply complete'
 assert_eq "the user's local edit is untouched" "$nvim_local_sum" "$(cksum <"$HOME/.config/nvim/init.lua")"
 assert_eq "later steps did not run" \
-  "$bundle_calls_before" "$(grep -c '^bundle --file' "$BREW_CALL_LOG")"
+  "$mise_calls_before" "$(grep -c '^mise install$' "$MISE_SHIM_LOG" 2>/dev/null || echo 0)"
 
 # --------------------------------------------------------------------------
 section "re-applying over a pre-existing real file backs it up instead of clobbering"

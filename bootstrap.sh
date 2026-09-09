@@ -10,9 +10,9 @@
 #   cd ~/dotfiles
 #   ./bootstrap.sh
 #
-# This intentionally does NOT live in dev/.local/bin: that directory only
-# lands on PATH after `stow -t ~ dev` runs, and this script is what runs
-# `stow` in the first place -- it can't depend on its own output.
+# This intentionally does NOT live in a package's .local/bin: that directory
+# only lands on PATH after stow runs, and this script is what runs `stow` in
+# the first place -- it can't depend on its own output.
 #
 # Manifest fields per step (see bootstrap-steps.json):
 #   name     (required) -- shown in logs
@@ -34,6 +34,17 @@
 #                          success with a WARNING, because the command's exit
 #                          code and the outcome are not the same question --
 #                          see the failure-handling note below.
+#   os       (optional) -- "macos" or "linux"; the step only runs on that
+#                          platform and is skipped elsewhere. Omit it for the
+#                          steps that are the same everywhere (stow, mise,
+#                          external repos). This is what lets one manifest
+#                          describe both machines: the package manager differs
+#                          (Homebrew in ~/.homebrew on macOS, Nix on Linux) but
+#                          everything downstream of it does not. Files, by
+#                          contrast, are NOT gated this way -- a file's package
+#                          (packages/macos, packages/linux) declares its
+#                          platform by where it lives, so it simply never
+#                          reaches the other machine.
 #   purpose  (optional) -- human-readable note, shown in logs
 #
 # Failure handling: steps are sequentially dependent (stow-ing before
@@ -54,7 +65,12 @@
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MANIFEST="${1:-$REPO_DIR/bootstrap-steps.json}"
+MANIFEST="${1:-$REPO_DIR/manifests/common/bootstrap-steps.json}"
+# $PLATFORM (macos|linux) is what a step's `os` field is matched against. It is
+# computed in exactly one place for the whole repository -- see lib/platform.sh
+# for why there are two names for the same machine.
+# shellcheck source=lib/platform.sh
+. "$REPO_DIR/lib/platform.sh"
 LOG_DIR="$HOME/.local/state/dotfiles"
 LOG_FILE="$LOG_DIR/setup-$(date '+%Y%m%d-%H%M%S').log"
 mkdir -p "$LOG_DIR"
@@ -93,14 +109,15 @@ for step in steps:
     skip_if = step.get("skip_if") or ""
     state = step.get("state") or ""
     purpose = step.get("purpose") or ""
-    print("\x1f".join([name, command, skip_if, state, purpose]))
+    os_ = step.get("os") or ""
+    print("\x1f".join([name, command, skip_if, state, purpose, os_]))
 ' "$MANIFEST" 2>&1); then
   fail "could not parse manifest (invalid JSON?): $MANIFEST"
   printf '%s\n' "$parsed" >&2
   exit 1
 fi
 
-log "bootstrap started, transcript: $LOG_FILE"
+log "bootstrap started on $PLATFORM, transcript: $LOG_FILE"
 
 # The manifest is fed in on fd 3, not stdin. A step's command inherits this
 # process's stdin, and any command that reads it -- `brew bundle` does -- would
@@ -109,8 +126,16 @@ log "bootstrap started, transcript: $LOG_FILE"
 # remaining step. That is exactly how the `wire docker CLI plugins` step went
 # missing while the run still exited 0. Keeping the steps on their own
 # descriptor also leaves stdin free for a step that legitimately needs to prompt.
-while IFS=$'\x1f' read -r name command skip_if state purpose <&3; do
+while IFS=$'\x1f' read -r name command skip_if state purpose step_os <&3; do
   [ -z "$name" ] && continue
+
+  # Platform gate first: a step for the other OS has no work to do here by
+  # definition, and its skip_if/state predicates may not even be evaluable
+  # (`brew shellenv` on Linux, `nix build` on a Mac without Nix).
+  if [ -n "$step_os" ] && [ "$step_os" != "$PLATFORM" ]; then
+    log "==> $name (skipped, declared for $step_os, this is $PLATFORM)"
+    continue
+  fi
 
   # Either predicate holding up front means there is nothing to do. They are
   # checked together here but mean different things: skip_if is "this step has

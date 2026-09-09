@@ -1,30 +1,37 @@
-# Allowlist model for dev/.config: anything new placed here (e.g. a tool's
+# Allowlist model for every packages/*/.config: anything new placed here (e.g. a tool's
 # config directory under ~/.config) is untracked by default, since these
 # directories commonly grow credential/token files over time (API keys,
 # OAuth tokens, session cookies) that would otherwise get silently
 # `git add -A`'d the moment they appear. To track a new config, explicitly
 # un-ignore it below (both the directory and its contents).
-dev/.config/*
+packages/*/.config/*
 
 # nvim config is managed by sync-external-repos, not tracked in this repo
 # (already excluded by the wildcard above; listed for clarity)
 
-!dev/.config/terminal/
-!dev/.config/terminal/**
+!packages/macos/.config/terminal/
+!packages/macos/.config/terminal/**
 
-!dev/.config/llama-server/
-!dev/.config/llama-server/**
+!packages/unix/.config/llama-server/
+!packages/unix/.config/llama-server/**
 
-!dev/.config/external-repos.json
+!packages/common/.config/external-repos.json
 
 # Pinned language runtimes (versions only -- mise keeps installs and any
 # credentials elsewhere, under ~/.local/share/mise)
-!dev/.config/mise/
-!dev/.config/mise/config.toml
+!packages/common/.config/mise/
+!packages/common/.config/mise/config.toml
+
+# Nix settings only (Linux). Deliberately narrow: nix.conf is the sole file
+# un-ignored here, because ~/.config/nix is also where `nix` writes
+# netrc-file paths and access tokens for private flake inputs -- exactly the
+# kind of thing this allowlist exists to keep out.
+!packages/linux/.config/nix/
+!packages/linux/.config/nix/nix.conf
 
 # Pi agent runtime state may contain credentials, downloaded binaries,
 # session history, caches, and machine-local UI settings.
-dev/.pi/agent/*
-!dev/.pi/agent/models.json
-!dev/.pi/agent/prompts/
-!dev/.pi/agent/prompts/**
+packages/common/.pi/agent/*
+!packages/common/.pi/agent/models.json
+!packages/common/.pi/agent/prompts/
+!packages/common/.pi/agent/prompts/**

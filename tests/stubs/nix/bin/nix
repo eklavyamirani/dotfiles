@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Stand-in for Nix, used only by the CI tests -- the Linux counterpart to
+# tests/stubs/homebrew/bin/brew.
+#
+# The scenarios run offline (`--network none`), and a real `nix build` would
+# fetch a nixpkgs revision and several hundred MB of closure from
+# cache.nixos.org. What actually needs testing is not that Nix works -- it
+# does -- but that bootstrap.sh and reapply.sh drive it correctly: that the
+# environment is built before stow (because stow comes out of it), that the
+# out-link lands where 45-nix.zsh expects, and that reapply's drift comparison
+# rebuilds when nix/flake.nix changes and stays quiet when it does not.
+#
+# What it deliberately keeps real:
+#   - it derives the "store path" from the package list in nix/flake.nix, so
+#     the drift comparison in reapply.sh is computed from the real manifest:
+#     edit the flake, the path changes, and a rebuild is planned -- exactly as
+#     with the real thing
+#   - `build --out-link` creates the symlink-into-the-store shape the scripts
+#     and 45-nix.zsh depend on, so a dangling out-link and its tripwire behave
+#     the way they would on a real machine
+#   - `eval --raw ...outPath` answers without building, which is what lets
+#     reapply.sh print a plan before it acts
+#   - stow and git in the built environment exec the real binaries, since the
+#     linking under test is done by the real stow
+#
+# Every invocation is appended to $NIX_CALL_LOG so tests can assert on what the
+# scripts actually asked Nix to do.
+set -uo pipefail
+
+NIX_CALL_LOG="${NIX_CALL_LOG:-/dev/null}"
+NIX_STORE_ROOT="${NIX_STORE_ROOT:?nix stub: NIX_STORE_ROOT must be set by the sandbox}"
+SHIM_LOG="${NIX_SHIM_LOG:-/dev/null}"
+printf '%s\n' "$*" >>"$NIX_CALL_LOG"
+
+# Drop the global flags the scripts pass ahead of the subcommand. Both pass
+# --extra-experimental-features explicitly (nix.conf is stowed, and on a fresh
+# machine stow has not run yet), so the stub has to tolerate them the way real
+# nix does.
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --extra-experimental-features) shift 2 ;;
+    --*) args+=("$1"); shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]}"
+
+command="${1:-}"
+[ $# -gt 0 ] && shift
+
+# "path:/some/dir#default" or "path:/some/dir#default.outPath" -> /some/dir
+flake_dir() {
+  local ref="$1"
+  ref="${ref#path:}"
+  printf '%s\n' "${ref%%#*}"
+}
+
+# The package names from the flake's `paths = with pkgs; [ ... ];` block, one
+# per line. Comments and an `unstable.` channel prefix are stripped, so
+# `unstable.mise # comment` reads as `mise` -- the same name the built
+# environment exposes in bin/.
+flake_packages() {
+  local flake="$1/flake.nix"
+  [ -f "$flake" ] || { printf 'nix stub: no flake.nix in %s\n' "$1" >&2; return 1; }
+  sed -n '/paths = with pkgs;/,/^[[:space:]]*\];/p' "$flake" |
+    sed -e 's/#.*$//' |
+    sed -n -E 's/^[[:space:]]*(unstable\.)?([A-Za-z0-9_-]+)[[:space:]]*$/\2/p'
+}
+
+# A content-addressed-ish name: same package list in, same path out; any edit
+# to the list yields a different one. That is the property reapply.sh's drift
+# check relies on, and modelling it here is what makes that check testable.
+store_path_for() {
+  local dir="$1" digest
+  digest="$(flake_packages "$dir" | sort | cksum | tr -d ' \t' | cut -c1-16)" || return 1
+  printf '%s/%s-dotfiles-dev-env\n' "$NIX_STORE_ROOT" "$digest"
+}
+
+# Same policy as the Homebrew stub: only tools a scenario genuinely needs to
+# work exec the real binary. An inert `mise` matters especially -- 55-mise.zsh
+# evaluates whatever `mise activate zsh` prints.
+SHIM_REAL_TOOLS="${NIX_SHIM_REAL_TOOLS:-stow git tree}"
+write_shim() { # dir, name
+  local dir="$1" name="$2" real="" search="" entry
+  case " $SHIM_REAL_TOOLS " in
+    *" $name "*)
+      local IFS_SAVE="$IFS"
+      IFS=:
+      for entry in $PATH; do
+        case "$entry" in ""|"$dir"|*/nix-env/bin|"$NIX_STORE_ROOT"/*) continue ;; esac
+        search="${search:+$search:}$entry"
+      done
+      IFS="$IFS_SAVE"
+      real="$(PATH="$search" command -v "$name" 2>/dev/null || true)"
+      ;;
+  esac
+  if [ -n "$real" ]; then
+    printf '#!/bin/sh\nexec %s "$@"\n' "$real" >"$dir/$name"
+  else
+    printf '#!/bin/sh\nprintf "%%s %%s\\n" "%s" "$*" >>"%s"\nexit 0\n' \
+      "$name" "$SHIM_LOG" >"$dir/$name"
+  fi
+  chmod +x "$dir/$name"
+}
+
+realise() { # flake dir -> prints the store path, creating it if needed
+  local dir="$1" path name
+  path="$(store_path_for "$dir")" || return 1
+  if [ ! -d "$path" ]; then
+    mkdir -p "$path/bin" "$path/share/zsh/site-functions"
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      write_shim "$path/bin" "$name"
+    done < <(flake_packages "$dir")
+  fi
+  printf '%s\n' "$path"
+}
+
+case "$command" in
+  build)
+    out_link="" ref=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --out-link) out_link="${2:-}"; shift 2 ;;
+        --*) shift ;;
+        *) ref="$1"; shift ;;
+      esac
+    done
+    [ -n "$ref" ] || { printf 'nix stub: build without a flake reference\n' >&2; exit 1; }
+    dir="$(flake_dir "$ref")"
+    path="$(realise "$dir")" || exit 1
+    if [ -n "$out_link" ]; then
+      mkdir -p "$(dirname "$out_link")"
+      ln -sfn "$path" "$out_link"
+    fi
+    ;;
+  eval)
+    ref=""
+    for arg in "$@"; do
+      case "$arg" in --*) ;; *) ref="$arg" ;; esac
+    done
+    [ -n "$ref" ] || { printf 'nix stub: eval without a flake reference\n' >&2; exit 1; }
+    # Only ...#default.outPath is ever asked for; anything else is a change in
+    # the scripts that this stub should be updated to match rather than guess at.
+    case "$ref" in
+      *'#default.outPath') ;;
+      *) printf 'nix stub: unsupported eval attribute: %s\n' "$ref" >&2; exit 1 ;;
+    esac
+    store_path_for "$(flake_dir "$ref")" || exit 1
+    ;;
+  --version)
+    printf 'nix (Nix) 0.0.0-stub\n'
+    ;;
+  *)
+    printf 'nix stub: unsupported command: %s %s\n' "$command" "$*" >&2
+    exit 1
+    ;;
+esac
