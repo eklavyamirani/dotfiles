@@ -362,6 +362,65 @@ directory as a fallback
 for processes that never source `.zprofile`, and carries its own tripwire
 warning if a pinned tool resolves outside `$HOME`.
 
+### WezTerm
+
+`packages/unix/.config/wezterm/` is the terminal for this account (Terminal.app and
+its Claude-Dev profile stay as the fallback). Four Lua modules, stowed to
+`~/.config/wezterm/`, which is where WezTerm looks after
+`$WEZTERM_CONFIG_FILE` and `~/.wezterm.lua`:
+
+| File | Owns |
+| --- | --- |
+| `wezterm.lua` | entry point; puts its own directory on `package.path`, then composes the other three |
+| `appearance.lua` | 0.88 opacity + macOS blur, FiraCode Nerd Font, Catppuccin Mocha, retro tab bar |
+| `agent_status.lua` | agent name in each tab title |
+| `keybindings.lua` | tmux vocabulary on a `Ctrl-b` leader |
+
+Validate a change before stowing it -- WezTerm falls back to its built-in
+defaults on a config error, which is easy to miss:
+
+```bash
+wezterm --config-file "$PWD/packages/unix/.config/wezterm/wezterm.lua" show-keys
+```
+
+#### Agent status in tab titles
+
+Answers "which tab has an agent running in it?" without switching to each
+tab. `agent_status.lua` reads each pane's foreground process and recognises
+the agent CLIs pinned in `packages/common/.config/mise/config.toml` -- `claude`,
+`codex`, `copilot`, and `pi` and `aider` if they appear -- rendering the
+tab as `● claude  dotfiles` instead of the pane's default title. They
+resolve cleanly because each is a native binary; an agent installed as an
+npm package would show up as `node` and need its wrapper name added to the
+table in that file.
+
+This deliberately stops short of distinguishing an agent that is *working*
+from one *blocked on a permission prompt*, which is the more useful
+signal. That state is not observable from outside the process -- the agent
+has to report it -- and every agent reports differently: Claude Code
+through `settings.json` hooks, Codex through a `hooks.json`, Copilot not at
+all, pi only via a code change. Four adapters to maintain, each breaking
+independently, for one glyph. Process detection needs no cooperation from
+anything, so it covers every agent equally, including ones not installed
+yet, and there is nothing to re-wire when an agent changes its hook format.
+That trade is the design, not an omission -- revisit it only if one
+mechanism ever covers all four.
+
+#### tmux keybindings
+
+`Ctrl-b` is the leader, the real tmux prefix -- WezTerm replaces tmux
+locally here, so nothing inside a pane competes for it (tmux stays pinned
+in mise for SSH). tmux session/window/pane map onto WezTerm
+workspace/tab/pane. `LEADER Ctrl-b` sends a literal `Ctrl-b`, the escape
+hatch tmux itself provides, since the prefix otherwise shadows readline's
+`backward-char`. `LEADER ?` lists every binding.
+
+Two bindings deliberately depart from tmux, because the literal
+translation does not exist locally: `LEADER d` hides the window rather
+than detaching (a local domain cannot be detached from), and `LEADER r`
+opens a repeatable resize mode rather than reloading the config -- WezTerm
+watches these files and reloads on save by itself.
+
 ### `dev-shell` from the admin account
 
 The admin-side `dev-shell` helper and its one-time SSH setup live with the
@@ -429,7 +488,8 @@ and the exit code is non-zero if anything failed.
 
 `.gitignore` ignores all of `packages/*/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
-`terminal/`, `llama-server/`, `mise/config.toml`, `external-repos.json`). This is deliberate:
+`terminal/`, `wezterm/`, `llama-server/`, `mise/config.toml`,
+`external-repos.json`). This is deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one
