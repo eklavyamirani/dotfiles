@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Register locally authored Herdr plugins with Herdr.
+#
+# Herdr does not scan its plugin directory: it reads a registry it keeps in
+# ~/.config/herdr/plugins.json, and only `herdr plugin link` / `herdr plugin
+# install` write to it. That registry stores absolute, machine-specific paths
+# and Herdr rewrites it on every link, so it can never be tracked in this
+# repository. Stowing a plugin's files is therefore not enough -- without this
+# step a fresh machine has the plugin source in place and Herdr still behaves
+# as though the plugin does not exist.
+#
+# This is the Brewfile relationship rather than the link-docker-cli-plugins
+# one: nothing here bridges a path mismatch (the files are already exactly
+# where Herdr looks). The declaration is the presence of a
+# packages/unix/.config/herdr/plugins/<name>/herdr-plugin.toml in this repo, and this
+# script converges Herdr's registry to it.
+#
+# Idempotent: safe to run on every bootstrap and reapply. `herdr plugin link`
+# is itself idempotent (re-linking an already-registered plugin is a no-op
+# that exits 0), so a failure to read the current registry degrades to
+# re-linking everything rather than to a wrong result.
+#
+# Drift is reported, never acted on -- the same rule the Brewfile follows.
+# A plugin that is registered but no longer present on disk is named in the
+# output; unregistering it is left to you (`herdr plugin unlink <id>`), so
+# this script can only ever add a registration.
+set -euo pipefail
+
+PLUGIN_DIR="$HOME/.config/herdr/plugins"
+
+# Resolve a possibly-symlinked file to its real path, following relative links.
+# Hand-rolled rather than `readlink -f` / `realpath`, neither of which is
+# available in the BSD userland on the macOS runner the test suite targets.
+resolve_file() {
+  local path="$1" target hops=0
+  while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    if [ "$hops" -gt 40 ]; then
+      printf 'link-herdr-plugins: WARNING symlink loop at %s\n' "$1" >&2
+      return 1
+    fi
+    target="$(readlink "$path")"
+    case "$target" in
+      /*) path="$target" ;;
+      *)  path="$(dirname "$path")/$target" ;;
+    esac
+  done
+  printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd -P)" "$(basename "$path")"
+}
+
+# Herdr comes from mise, which may not have run yet on a fresh machine.
+if ! command -v herdr >/dev/null 2>&1; then
+  printf 'link-herdr-plugins: herdr is not on PATH, nothing to do\n'
+  exit 0
+fi
+
+if [ ! -d "$PLUGIN_DIR" ]; then
+  printf 'link-herdr-plugins: no plugin directory at %s, nothing to do\n' "$PLUGIN_DIR"
+  exit 0
+fi
+
+# Registered plugin roots, one per line. Herdr resolves symlinks before
+# storing these, so they are real paths -- candidates are resolved the same
+# way below before comparing. An unreadable registry yields an empty list,
+# which is safe: every plugin is then re-linked, idempotently.
+registered_roots="$(
+  herdr plugin list --json 2>/dev/null \
+    | grep -o '"plugin_root":[[:space:]]*"[^"]*"' \
+    | sed 's/.*"plugin_root":[[:space:]]*"//; s/"$//' \
+    || true
+)"
+
+linked=0
+skipped=0
+
+for manifest in "$PLUGIN_DIR"/*/herdr-plugin.toml; do
+  # Requiring the manifest is what keeps plugins/config/ -- which holds each
+  # plugin's own config directory, not a plugin -- out of this loop. It also
+  # covers the no-match case, where the glob stays literal.
+  [ -f "$manifest" ] || continue
+
+  plugin_root="$(dirname "$manifest")"
+  # Compare the way Herdr records it. Stow links the manifest *file* into a
+  # real directory, and Herdr stores the resolved target -- so resolving the
+  # directory would yield the $HOME path and never match the repo path Herdr
+  # actually holds, re-linking on every run.
+  real_root="$(dirname "$(resolve_file "$manifest")")"
+
+  if printf '%s\n' "$registered_roots" | grep -Fxq "$real_root"; then
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  if herdr plugin link "$plugin_root" >/dev/null; then
+    printf 'link-herdr-plugins: registered %s\n' "$(basename "$plugin_root")"
+    linked=$((linked + 1))
+  else
+    printf 'link-herdr-plugins: WARNING failed to register %s\n' "$plugin_root" >&2
+  fi
+done
+
+# Report registrations whose source has gone -- typically a plugin deleted
+# from this repo since it was linked. Reported only; see the header.
+while IFS= read -r root; do
+  [ -n "$root" ] || continue
+  [ -d "$root" ] && continue
+  printf 'link-herdr-plugins: WARNING %s is registered but missing on disk\n' "$root" >&2
+done <<EOF
+$registered_roots
+EOF
+
+printf 'link-herdr-plugins: %d registered, %d already current\n' "$linked" "$skipped"

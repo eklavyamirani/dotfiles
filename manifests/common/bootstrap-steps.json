@@ -73,6 +73,11 @@
     "purpose": "docker resolves buildx/compose from ~/.docker/cli-plugins, not PATH -- installing the formulae is not enough. macOS only: the plugins are Homebrew formulae, and on Linux docker's own packaging already puts them where the CLI looks"
   },
   {
+    "name": "register herdr plugins",
+    "command": "\"$HOME/.local/bin/link-herdr-plugins\"",
+    "purpose": "Herdr reads a plugin registry it keeps in ~/.config/herdr/plugins.json rather than scanning its plugin directory, and that registry holds absolute paths this repo cannot track. Stowing a plugin's files therefore leaves Herdr unaware of it. Runs after stow, which places the files, and after mise, which installs herdr itself"
+  },
+  {
     "name": "register the pinned zsh as a valid login shell",
     "os": "linux",
     "command": "sh -c 'printf \"%s\\n\" \"$HOME/.local/state/dotfiles/nix-env/bin/zsh\" | sudo tee -a /etc/shells >/dev/null'",

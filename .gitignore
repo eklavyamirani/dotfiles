@@ -29,6 +29,24 @@ packages/*/.config/*
 !packages/linux/.config/nix/
 !packages/linux/.config/nix/nix.conf
 
+# Herdr keeps its config and its runtime state in the same directory, so the
+# allowlist is re-applied one level down: sockets, logs, session.json, the
+# .plugins.lock, and the generated plugins.json registry (absolute paths,
+# rewritten on every link/enable) all stay machine-local. Only config.toml and
+# the locally authored plugin are tracked.
+!packages/unix/.config/herdr/
+packages/unix/.config/herdr/*
+!packages/unix/.config/herdr/config.toml
+!packages/unix/.config/herdr/plugins/
+packages/unix/.config/herdr/plugins/*
+!packages/unix/.config/herdr/plugins/workspace-manager/
+!packages/unix/.config/herdr/plugins/workspace-manager/**
+packages/unix/.config/herdr/plugins/workspace-manager/__pycache__/
+!packages/unix/.config/herdr/plugins/config/
+packages/unix/.config/herdr/plugins/config/*
+!packages/unix/.config/herdr/plugins/config/local.workspace-manager/
+!packages/unix/.config/herdr/plugins/config/local.workspace-manager/keys.toml
+
 # Pi agent runtime state may contain credentials, downloaded binaries,
 # session history, caches, and machine-local UI settings.
 packages/common/.pi/agent/*
