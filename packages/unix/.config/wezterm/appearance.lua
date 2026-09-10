@@ -17,6 +17,12 @@ M.scheme = wezterm.color.get_builtin_schemes()[M.scheme_name]
 function M.apply(config)
   config.color_scheme = M.scheme_name
 
+  -- Use Metal on macOS. The default OpenGL renderer cannot create an
+  -- NSOpenGLPixelFormat on this macOS VM and exits before opening a window.
+  if wezterm.target_triple:find('apple%-darwin') then
+    config.front_end = 'WebGpu'
+  end
+
   -- ---- Transparency -------------------------------------------------
   -- 0.88 is deliberately not lower: below ~0.8 the desktop starts
   -- competing with the text, and Catppuccin's low-contrast comment colour

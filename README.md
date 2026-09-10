@@ -390,12 +390,19 @@ its Claude-Dev profile stay as the fallback). Four Lua modules, stowed to
 | `agent_status.lua` | agent name in each tab title |
 | `keybindings.lua` | tmux vocabulary on a `Ctrl-b` leader |
 
+On macOS, appearance selects the `WebGpu` renderer, which uses Metal. The
+default OpenGL renderer fails to create `NSOpenGLPixelFormat` on this macOS VM
+and exits before opening a window. Other platforms keep their default renderer.
+
 Validate a change before stowing it -- WezTerm falls back to its built-in
 defaults on a config error, which is easy to miss:
 
 ```bash
 wezterm --config-file "$PWD/packages/unix/.config/wezterm/wezterm.lua" show-keys
 ```
+
+Also launch the app after changing renderer settings: `show-keys` checks the
+config but does not create a graphics context or prove that a window can open.
 
 #### Agent status in tab titles
 
