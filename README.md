@@ -351,9 +351,23 @@ overclaims is worse than no table:
   since on Linux the distribution's own docker packaging already puts the
   plugins where the CLI looks.
 - **Casks.** `brew bundle` is the only thing here that manages `.app`
-  bundles at all. macOS only by definition.
+  bundles at all. WezTerm and FiraCode Nerd Font are declared on macOS.
+  The Brewfile sets `cask_args appdir: "~/Applications"` for all app casks,
+  including future additions, so bootstrap and reapply need no admin password
+  to install WezTerm. The Homebrew shell snippet exports the matching
+  `HOMEBREW_CASK_OPTS` for manual installs; fonts still use `~/Library/Fonts`.
+  Missing or undeclared Homebrew casks appear in reapply's drift report.
 - **External repos.** `sync-external-repos` tracks branch tips with no
   commit pinning (see below) — a separate, still-open gap.
+
+If WezTerm was previously installed by dragging an app bundle into
+`~/Applications`, quit it and move `~/Applications/WezTerm.app` to a backup
+location outside `~/Applications` before running `./reapply.sh`. Keep that
+backup until the managed app launches successfully. This avoids a conflicting
+bundle without deleting it or assuming Homebrew can adopt a different version.
+The config in `~/.config/wezterm` stays in place. Homebrew's
+[`--adopt`](https://docs.brew.sh/Manpage) is an alternative only when the existing
+bundle is identical to the version being installed.
 
 `packages/unix/.zprofile.d/55-mise.zsh` activates mise after whichever package manager
 supplied it — Homebrew at `50-` on macOS, Nix at `45-` on Linux — so pinned
@@ -361,6 +375,72 @@ tools win over a same-named formula or nixpkgs package, appends mise's shims
 directory as a fallback
 for processes that never source `.zprofile`, and carries its own tripwire
 warning if a pinned tool resolves outside `$HOME`.
+
+### WezTerm
+
+`packages/unix/.config/wezterm/` is the terminal for this account (Terminal.app and
+its Claude-Dev profile stay as the fallback). Four Lua modules, stowed to
+`~/.config/wezterm/`, which is where WezTerm looks after
+`$WEZTERM_CONFIG_FILE` and `~/.wezterm.lua`:
+
+| File | Owns |
+| --- | --- |
+| `wezterm.lua` | entry point; puts its own directory on `package.path`, then composes the other three |
+| `appearance.lua` | 0.88 opacity + macOS blur, FiraCode Nerd Font, Catppuccin Mocha, retro tab bar |
+| `agent_status.lua` | agent name in each tab title |
+| `keybindings.lua` | tmux vocabulary on a `Ctrl-b` leader |
+
+On macOS, appearance selects the `WebGpu` renderer, which uses Metal. The
+default OpenGL renderer fails to create `NSOpenGLPixelFormat` on this macOS VM
+and exits before opening a window. Other platforms keep their default renderer.
+
+Validate a change before stowing it -- WezTerm falls back to its built-in
+defaults on a config error, which is easy to miss:
+
+```bash
+wezterm --config-file "$PWD/packages/unix/.config/wezterm/wezterm.lua" show-keys
+```
+
+Also launch the app after changing renderer settings: `show-keys` checks the
+config but does not create a graphics context or prove that a window can open.
+
+#### Agent status in tab titles
+
+Answers "which tab has an agent running in it?" without switching to each
+tab. `agent_status.lua` reads each pane's foreground process and recognises
+the agent CLIs pinned in `packages/common/.config/mise/config.toml` -- `claude`,
+`codex`, `copilot`, and `pi` and `aider` if they appear -- rendering the
+tab as `● claude  dotfiles` instead of the pane's default title. They
+resolve cleanly because each is a native binary; an agent installed as an
+npm package would show up as `node` and need its wrapper name added to the
+table in that file.
+
+This deliberately stops short of distinguishing an agent that is *working*
+from one *blocked on a permission prompt*, which is the more useful
+signal. That state is not observable from outside the process -- the agent
+has to report it -- and every agent reports differently: Claude Code
+through `settings.json` hooks, Codex through a `hooks.json`, Copilot not at
+all, pi only via a code change. Four adapters to maintain, each breaking
+independently, for one glyph. Process detection needs no cooperation from
+anything, so it covers every agent equally, including ones not installed
+yet, and there is nothing to re-wire when an agent changes its hook format.
+That trade is the design, not an omission -- revisit it only if one
+mechanism ever covers all four.
+
+#### tmux keybindings
+
+`Ctrl-b` is the leader, the real tmux prefix -- WezTerm replaces tmux
+locally here, so nothing inside a pane competes for it (tmux stays pinned
+in mise for SSH). tmux session/window/pane map onto WezTerm
+workspace/tab/pane. `LEADER Ctrl-b` sends a literal `Ctrl-b`, the escape
+hatch tmux itself provides, since the prefix otherwise shadows readline's
+`backward-char`. `LEADER ?` lists every binding.
+
+Two bindings deliberately depart from tmux, because the literal
+translation does not exist locally: `LEADER d` hides the window rather
+than detaching (a local domain cannot be detached from), and `LEADER r`
+opens a repeatable resize mode rather than reloading the config -- WezTerm
+watches these files and reloads on save by itself.
 
 ### `dev-shell` from the admin account
 
@@ -429,7 +509,8 @@ and the exit code is non-zero if anything failed.
 
 `.gitignore` ignores all of `packages/*/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
-`terminal/`, `llama-server/`, `mise/config.toml`, `external-repos.json`). This is deliberate:
+`terminal/`, `wezterm/`, `llama-server/`, `mise/config.toml`,
+`external-repos.json`). This is deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one

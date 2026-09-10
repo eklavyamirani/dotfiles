@@ -12,6 +12,11 @@ packages/*/.config/*
 !packages/macos/.config/terminal/
 !packages/macos/.config/terminal/**
 
+# WezTerm config (Lua modules only -- WezTerm keeps no state or credentials
+# in this directory).
+!packages/unix/.config/wezterm/
+!packages/unix/.config/wezterm/**
+
 !packages/unix/.config/llama-server/
 !packages/unix/.config/llama-server/**
 

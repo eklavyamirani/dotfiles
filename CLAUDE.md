@@ -273,6 +273,13 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
   runtimes (exact versions; see the declarative principle above)
 - **`.zprofile.d/60-terminal-appearance.zsh`** - Claude-Dev Terminal.app
   profile bootstrap
+- **`.config/wezterm/`** - WezTerm: transparency, agent-aware tab titles,
+  tmux keybindings on a `Ctrl-b` leader. Four Lua modules (`wezterm.lua`
+  composes `appearance`, `agent_status`, `keybindings`). Validate edits
+  with `wezterm --config-file <path> show-keys` before stowing -- a config
+  error makes WezTerm fall back to its defaults silently. Tab titles detect
+  agents by foreground process only; the README records why the finer
+  working/blocked distinction is deliberately not tracked
 
 ### Scripts (`packages/*/.local/bin`)
 - **`sync-external-repos`** - clones/updates repos from `external-repos.json`

@@ -170,6 +170,17 @@ case "$command" in
         make_shim "$name"
         printf '%s\n' "$name" >>"$PREFIX/bundled-formulae.txt"
       else
+        if [ "$name" = wezterm ]; then
+          # Model the Brewfile's appdir option, independently of login-shell
+          # exports: bootstrap and reapply must work without sourcing zsh.
+          appdir="$(sed -n -E 's/^cask_args appdir: "([^"]+)".*/\1/p' "$file")"
+          case "$appdir" in '~/'*) appdir="$HOME/${appdir#\~/}" ;; esac
+          if [ "$appdir" != "$HOME/Applications" ]; then
+            printf 'brew stub: refusing app install outside ~/Applications\n' >&2
+            exit 1
+          fi
+          mkdir -p "$appdir/WezTerm.app"
+        fi
         printf '%s\n' "$name" >>"$PREFIX/bundled-casks.txt"
       fi
       printf '%s\n' "$name" >>"$PREFIX/bundled.txt"

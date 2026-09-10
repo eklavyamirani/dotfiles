@@ -65,6 +65,10 @@ brew "docker-compose"
 # (python@3.14 will still appear installed -- it is a dependency of hf.)
 
 # ---- Casks (GUI apps / fonts) ----
+# Applies even when bootstrap/reapply runs without a login shell.
+# All app bundles belong to this non-admin account; fonts keep their default.
+cask_args appdir: "~/Applications"
+cask "wezterm"
 cask "font-fira-code-nerd-font"
 # cask "visual-studio-code"
 # cask "obsidian"

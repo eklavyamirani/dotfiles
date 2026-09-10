@@ -301,6 +301,20 @@ rm -f "$HOME/.zprofile.d/99-foreign.zsh"
 #          There is nothing to prune, and no --prune to test.
 # --------------------------------------------------------------------------
 if [ "$PLATFORM" = macos ]; then
+section "WezTerm cask drift is reported and repaired"
+"$HOME/.homebrew/bin/brew" uninstall --cask wezterm >/dev/null 2>&1
+rmdir "$HOME/Applications/WezTerm.app"
+assert_true "reapply reinstalls a missing WezTerm cask" run_reapply
+assert_file_has "missing WezTerm is reported" "$REAPPLY_OUT" '^ +wezterm$'
+assert_file_has "WezTerm is registered again" "$HOME/.homebrew/bundled-casks.txt" '^wezterm$'
+assert_true "reapply restores the app in the account" test -d "$HOME/Applications/WezTerm.app"
+cp "$REPO/manifests/macos/Brewfile" "$SANDBOX/Brewfile.wezterm"
+sed '/^cask "wezterm"$/d' "$SANDBOX/Brewfile.wezterm" >"$REPO/manifests/macos/Brewfile"
+assert_true "reapply reports an undeclared WezTerm" run_reapply --dry-run
+assert_file_has "undeclared cask drift is reported" "$REAPPLY_OUT" 'DRIFT: 1 package\(s\) installed but not declared'
+assert_file_has "undeclared WezTerm is named" "$REAPPLY_OUT" '^ +wezterm$'
+cp "$SANDBOX/Brewfile.wezterm" "$REPO/manifests/macos/Brewfile"
+
 section "a package installed out of band is reported, and removed only on --prune"
 # --------------------------------------------------------------------------
 "$HOME/.homebrew/bin/brew" install straggler >/dev/null 2>&1
