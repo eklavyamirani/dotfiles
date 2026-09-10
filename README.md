@@ -351,9 +351,23 @@ overclaims is worse than no table:
   since on Linux the distribution's own docker packaging already puts the
   plugins where the CLI looks.
 - **Casks.** `brew bundle` is the only thing here that manages `.app`
-  bundles at all. macOS only by definition.
+  bundles at all. WezTerm and FiraCode Nerd Font are declared on macOS.
+  The Brewfile sets `cask_args appdir: "~/Applications"` for all app casks,
+  including future additions, so bootstrap and reapply need no admin password
+  to install WezTerm. The Homebrew shell snippet exports the matching
+  `HOMEBREW_CASK_OPTS` for manual installs; fonts still use `~/Library/Fonts`.
+  Missing or undeclared Homebrew casks appear in reapply's drift report.
 - **External repos.** `sync-external-repos` tracks branch tips with no
   commit pinning (see below) — a separate, still-open gap.
+
+If WezTerm was previously installed by dragging an app bundle into
+`~/Applications`, quit it and move `~/Applications/WezTerm.app` to a backup
+location outside `~/Applications` before running `./reapply.sh`. Keep that
+backup until the managed app launches successfully. This avoids a conflicting
+bundle without deleting it or assuming Homebrew can adopt a different version.
+The config in `~/.config/wezterm` stays in place. Homebrew's
+[`--adopt`](https://docs.brew.sh/Manpage) is an alternative only when the existing
+bundle is identical to the version being installed.
 
 `packages/unix/.zprofile.d/55-mise.zsh` activates mise after whichever package manager
 supplied it — Homebrew at `50-` on macOS, Nix at `45-` on Linux — so pinned

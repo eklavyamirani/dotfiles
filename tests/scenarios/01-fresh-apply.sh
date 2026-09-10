@@ -146,6 +146,13 @@ assert_file_has "brew install ran for stow and mise" "$BREW_CALL_LOG" '^install 
 assert_file_has "brew bundle used the repo Brewfile" "$BREW_CALL_LOG" "^bundle --file=$REPO/manifests/macos/Brewfile$"
 
 section "Brewfile packages reached brew bundle"
+assert_file_has "WezTerm cask is installed" "$HOME/.homebrew/bundled-casks.txt" '^wezterm$'
+assert_true "WezTerm app is installed in the account" test -d "$HOME/Applications/WezTerm.app"
+assert_true "manual cask installs use the account appdir" \
+  zsh -c 'source "$HOME/.zprofile"; [[ "$HOMEBREW_CASK_OPTS" = "--appdir=$HOME/Applications" ]]'
+zsh -c 'source "$HOME/.zprofile"; export HOMEBREW_CASK_OPTS="--appdir=/Applications"; _brew_isolation_check' \
+  >"$SANDBOX/cask-tripwire.out" 2>&1
+assert_file_has "tripwire reports an appdir override" "$SANDBOX/cask-tripwire.out" 'cask appdir differs'
 while read -r pkg; do
   assert_file_has "Brewfile entry installed: $pkg" "$HOME/.homebrew/bundled.txt" "^${pkg}$"
 done < <(sed -e 's/#.*$//' "$REPO/manifests/macos/Brewfile" | sed -n -E 's/^[[:space:]]*brew[[:space:]]+"([^"]+)".*/\1/p')

@@ -17,6 +17,9 @@
 # ~/.zprofile.d/.
 eval "$(~/.homebrew/bin/brew shellenv)"
 
+# Match the Brewfile's cask_args for manual cask installs in this shell.
+export HOMEBREW_CASK_OPTS="--appdir=$HOME/Applications"
+
 # Add Homebrew's completions to the shell path
 if type brew &>/dev/null; then
   FPATH=$(brew --prefix)/share/zsh/site-functions:$FPATH
@@ -35,6 +38,9 @@ brew() { "$HOME/.homebrew/bin/brew" "$@"; }
 # would mean some other Homebrew install (an admin account's /opt/homebrew or
 # /usr/local, for example) has leaked onto this account's PATH.
 _brew_isolation_check() {
+  if [[ "$HOMEBREW_CASK_OPTS" != "--appdir=$HOME/Applications" ]]; then
+    print -P "%F{red}⚠ WARNING: cask appdir differs from \$HOME/Applications. Homebrew isolation may be broken.%f"
+  fi
   local resolved="$(whence -p brew 2>/dev/null)"
   if [[ -n "$resolved" && "$resolved" != "$HOME"/* ]]; then
     print -P "%F{red}⚠ WARNING: real 'brew' on PATH resolves to $resolved, outside \$HOME. Homebrew isolation may be broken.%f"
