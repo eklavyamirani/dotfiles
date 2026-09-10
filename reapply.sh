@@ -502,6 +502,13 @@ if [ "$PLATFORM" = macos ] && [ -x "$TARGET/.local/bin/link-docker-cli-plugins" 
   "$TARGET/.local/bin/link-docker-cli-plugins" || { fail "linking docker cli plugins failed"; exit 1; }
 fi
 
+# Must run after stow: Herdr keeps its own plugin registry, so a plugin whose
+# files this run has only just linked into place is still unknown to Herdr.
+if [ -x "$TARGET/.local/bin/link-herdr-plugins" ]; then
+  log "==> register herdr plugins"
+  "$TARGET/.local/bin/link-herdr-plugins" || { fail "registering herdr plugins failed"; exit 1; }
+fi
+
 log "re-apply complete, transcript saved at $LOG_FILE"
 [ -d "$BACKUP_DIR" ] && log "files moved aside this run: $BACKUP_DIR"
 exit 0

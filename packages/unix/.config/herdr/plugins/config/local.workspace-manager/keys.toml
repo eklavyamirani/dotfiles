@@ -1,0 +1,31 @@
+# Workspace Manager in-popup keybindings.
+#
+# Every line below shows the default. Uncomment and edit to override; any action
+# you don't mention keeps its default. Values are a single key or a list of keys.
+# Check your changes with:
+#
+#   python3 ~/.config/herdr/plugins/workspace-manager/workspace_manager.py --check-keys
+#
+# Accepted key names:
+#   any single character            j  K  /  ?  1
+#   ctrl+<letter>                   ctrl+n  ctrl+d
+#   enter esc space tab backspace
+#   up down left right home end pgup pgdn
+#
+# A key can only drive one action. If two actions claim the same key, the one
+# listed first here wins and the popup shows a warning on open.
+#
+# Note: 1-9 always jump to that workspace unless you bind those digits to an
+# action here. Inside the rename and filter prompts, enter/esc/backspace always
+# mean confirm/cancel/delete and cannot be remapped.
+
+# quit          = ["q", "esc"]
+# cursor_down   = ["j", "down"]
+# cursor_up     = ["k", "up"]
+# cursor_top    = ["g"]
+# cursor_bottom = ["G"]
+# move_down     = ["J"]
+# move_up       = ["K"]
+# rename        = ["r"]
+# filter        = ["/"]
+# focus         = ["enter"]
