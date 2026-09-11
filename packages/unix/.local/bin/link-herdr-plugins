@@ -48,10 +48,25 @@ resolve_file() {
   printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd -P)" "$(basename "$path")"
 }
 
-# Herdr comes from mise, which may not have run yet on a fresh machine.
-if ! command -v herdr >/dev/null 2>&1; then
-  printf 'link-herdr-plugins: herdr is not on PATH, nothing to do\n'
-  exit 0
+# Herdr is pinned in the mise config and this script is ordered to run after
+# the step that installs it, so a herdr that cannot be found here means that
+# install did not happen -- a real failure, not a no-op. Exiting 0 would leave
+# a machine that looks converged while Herdr knows about none of its plugins.
+#
+# `command -v` alone is not the test, though: mise's tools reach PATH through
+# the shims that .zprofile puts there, and neither bootstrap nor reapply.sh is
+# a login shell -- so an installed herdr is routinely not yet on PATH at this
+# point. Ask mise for the real path first, and only fail if it has no herdr
+# either.
+HERDR="$(command -v herdr 2>/dev/null || true)"
+if [ -z "$HERDR" ] && command -v mise >/dev/null 2>&1; then
+  HERDR="$(mise which herdr 2>/dev/null || true)"
+fi
+if [ -z "$HERDR" ]; then
+  printf 'link-herdr-plugins: ERROR herdr not found on PATH or via mise.\n' >&2
+  printf 'link-herdr-plugins: it is pinned in .config/mise/config.toml and this\n' >&2
+  printf 'link-herdr-plugins: step runs after `mise install` -- check that it ran.\n' >&2
+  exit 1
 fi
 
 if [ ! -d "$PLUGIN_DIR" ]; then
@@ -64,7 +79,7 @@ fi
 # way below before comparing. An unreadable registry yields an empty list,
 # which is safe: every plugin is then re-linked, idempotently.
 registered_roots="$(
-  herdr plugin list --json 2>/dev/null \
+  "$HERDR" plugin list --json 2>/dev/null \
     | grep -o '"plugin_root":[[:space:]]*"[^"]*"' \
     | sed 's/.*"plugin_root":[[:space:]]*"//; s/"$//' \
     || true
@@ -91,7 +106,7 @@ for manifest in "$PLUGIN_DIR"/*/herdr-plugin.toml; do
     continue
   fi
 
-  if herdr plugin link "$plugin_root" >/dev/null; then
+  if "$HERDR" plugin link "$plugin_root" >/dev/null; then
     printf 'link-herdr-plugins: registered %s\n' "$(basename "$plugin_root")"
     linked=$((linked + 1))
   else
