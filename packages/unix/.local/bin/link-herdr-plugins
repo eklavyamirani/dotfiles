@@ -48,9 +48,32 @@ resolve_file() {
   printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd -P)" "$(basename "$path")"
 }
 
-# Herdr comes from mise, which may not have run yet on a fresh machine.
-if ! command -v herdr >/dev/null 2>&1; then
-  printf 'link-herdr-plugins: herdr is not on PATH, nothing to do\n'
+# Herdr is pinned in the mise config and this script is ordered to run after
+# the step that installs it, so a herdr that cannot be found here means that
+# install did not happen -- worth reporting, not worth passing over in silence.
+#
+# `command -v` alone is not the test, though: mise's tools reach PATH through
+# the shims that .zprofile puts there, and neither bootstrap nor reapply.sh is
+# a login shell -- so an installed herdr is routinely not yet on PATH at this
+# point. Ask mise for the real path first, and only warn if it has no herdr
+# either.
+HERDR="$(command -v herdr 2>/dev/null || true)"
+if [ -z "$HERDR" ] && command -v mise >/dev/null 2>&1; then
+  HERDR="$(mise which herdr 2>/dev/null || true)"
+fi
+if [ -z "$HERDR" ]; then
+  # Reported loudly, but not fatal -- the same rule link-docker-cli-plugins
+  # follows when its prefix is absent. A missing herdr does mean this run did
+  # not converge Herdr's registry, and saying so is the point of the warning.
+  # Exiting non-zero, though, halts the *whole* run at this step: on Linux the
+  # steps that register and switch to the pinned login shell come after this
+  # one, and a machine with no login shell is a far worse outcome than a
+  # machine whose Herdr plugins are not yet registered. Re-running bootstrap or
+  # ./reapply.sh once herdr is installed converges it.
+  printf 'link-herdr-plugins: WARNING herdr not found on PATH or via mise.\n' >&2
+  printf 'link-herdr-plugins: it is pinned in .config/mise/config.toml and this\n' >&2
+  printf 'link-herdr-plugins: step runs after `mise install` -- check that it ran.\n' >&2
+  printf 'link-herdr-plugins: no plugins were registered; re-run once herdr exists.\n' >&2
   exit 0
 fi
 
@@ -64,7 +87,7 @@ fi
 # way below before comparing. An unreadable registry yields an empty list,
 # which is safe: every plugin is then re-linked, idempotently.
 registered_roots="$(
-  herdr plugin list --json 2>/dev/null \
+  "$HERDR" plugin list --json 2>/dev/null \
     | grep -o '"plugin_root":[[:space:]]*"[^"]*"' \
     | sed 's/.*"plugin_root":[[:space:]]*"//; s/"$//' \
     || true
@@ -91,7 +114,7 @@ for manifest in "$PLUGIN_DIR"/*/herdr-plugin.toml; do
     continue
   fi
 
-  if herdr plugin link "$plugin_root" >/dev/null; then
+  if "$HERDR" plugin link "$plugin_root" >/dev/null; then
     printf 'link-herdr-plugins: registered %s\n' "$(basename "$plugin_root")"
     linked=$((linked + 1))
   else
