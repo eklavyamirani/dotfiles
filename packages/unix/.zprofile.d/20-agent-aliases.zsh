@@ -6,6 +6,7 @@ alias pi-local='pi --model llama/qwen3.6-27b'
 # GitHub Copilot with Claude Sonnet 5 at its lowest supported effort
 alias ask-copilot='copilot --model claude-sonnet-5 --effort low -p --allow-all-tools'
 alias claude='claude --allow-dangerously-skip-permissions'
+alias codex='codex --approve-for-me'
 
 localClaude() {
   if [[ ! "$*" =~ "--model" ]]; then
