@@ -34,6 +34,16 @@ packages/*/.config/*
 !packages/linux/.config/nix/
 !packages/linux/.config/nix/nix.conf
 
+# Claude Code writes credentials, session transcripts, todo state, shell
+# snapshots, and per-project caches into ~/.claude. Only the managed
+# configuration belongs in the repository.
+packages/common/.claude/*
+!packages/common/.claude/CLAUDE.md
+!packages/common/.claude/settings.json
+!packages/common/.claude/statusline-command.sh
+!packages/common/.claude/skills/
+!packages/common/.claude/skills/**
+
 # Pi agent runtime state may contain credentials, downloaded binaries,
 # session history, caches, and machine-local UI settings.
 packages/common/.pi/agent/*
