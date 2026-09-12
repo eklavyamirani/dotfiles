@@ -285,6 +285,10 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
 - **`sync-external-repos`** - clones/updates repos from `external-repos.json`
 - **`link-docker-cli-plugins`** - links brew's docker plugins into
   `~/.docker/cli-plugins` (idempotent; never overwrites a real file there)
+- **`link-herdr-plugins`** - registers locally authored Herdr plugins with
+  Herdr (idempotent). Herdr reads a registry of absolute paths at
+  `~/.config/herdr/plugins.json` instead of scanning its plugin directory,
+  so stowing a plugin's files is not enough to make Herdr see it
 
 ### Neovim Configuration (`~/.config/nvim`, external repo via `sync-external-repos`)
 - **`init.lua`** - Main initialization file with basic settings and keymaps
