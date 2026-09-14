@@ -531,14 +531,23 @@ VM (192.168.64.5)                      HOST (192.168.64.1, M3 Max 96 GB)
   provider "llama-host"                 Qwen3.8-27B Q4_K_XL + Metal
 ```
 
-> **Server-side configuration lives outside this repository.**
-> The llama-server launcher scripts and sampling profiles are a
-> self-contained repo deployed to **`~/.config/llama-server`** -- see its
-> `README.md` for installing llama.cpp, downloading the model, quant choices,
-> MTP speculative decoding, and measured Metal benchmarks. Nothing in these
-> dotfiles reads that directory; only this documentation points at it. It is
-> intended to move to its own remote and be cloned by `external-repos.json`,
-> the way the Neovim config already is.
+> **Server-side configuration lives outside this repository:**
+> [eklavyamirani/llama-server-config](https://github.com/eklavyamirani/llama-server-config)
+>
+> The llama-server launcher scripts and sampling profiles are a self-contained
+> repo, deployed to **`~/.config/llama-server`** -- see its `README.md` for
+> installing llama.cpp, downloading the model, quant choices, MTP speculative
+> decoding, and measured Metal benchmarks. Nothing in these dotfiles reads
+> that directory; only this documentation points at it.
+>
+> It is deliberately *not* wired into `external-repos.json`: only a machine
+> that actually serves a model needs it, and that manifest is synced on every
+> machine. Clone it by hand where it is wanted:
+>
+> ```bash
+> git clone https://github.com/eklavyamirani/llama-server-config \
+>     ~/.config/llama-server
+> ```
 >
 > A machine that is only a *client* needs nothing from there. Everything a
 > client requires is below.
