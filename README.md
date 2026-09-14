@@ -3,7 +3,7 @@
 Stow-based dotfiles for an isolated, non-admin macOS account
 that owns all development tooling (CLI tools and
 runtimes pinned with mise; an isolated Homebrew in `~/.homebrew`, no sudo
-required; neovim; pi/llama-server configs). The paired
+required; neovim; pi agent config). The paired
 main/admin account is deliberately minimal and its profile is kept only as
 a frozen snapshot in `archive/admin/` (see its README) until it moves to
 its own repository.
@@ -509,8 +509,8 @@ and the exit code is non-zero if anything failed.
 
 `.gitignore` ignores all of `packages/*/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
-`terminal/`, `wezterm/`, `llama-server/`, `mise/config.toml`,
-`external-repos.json`). This is deliberate:
+`terminal/`, `wezterm/`, `mise/config.toml`, `external-repos.json`). This is
+deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one
@@ -518,7 +518,7 @@ missed entry and a `git add -A` silently commits a secret. To track a new
 tool's config, add explicit `!packages/<pkg>/.config/<tool>/` and
 `!packages/<pkg>/.config/<tool>/**` un-ignore lines to `.gitignore`.
 
-### Local LLM setup (Qwen3.8-27B + pi agent)
+### Local LLM (Qwen3.8-27B + pi agent)
 
 **Architecture: llama.cpp runs on the M3 Max host; the VM is an HTTP client.**
 Inference never happens in the VM -- it has neither the RAM nor GPU access.
@@ -531,48 +531,23 @@ VM (192.168.64.5)                      HOST (192.168.64.1, M3 Max 96 GB)
   provider "llama-host"                 Qwen3.8-27B Q4_K_XL + Metal
 ```
 
-On the host, run these one-time steps:
+> **Server-side configuration lives outside this repository.**
+> The llama-server launcher scripts and sampling profiles are a
+> self-contained repo deployed to **`~/.config/llama-server`** -- see its
+> `README.md` for installing llama.cpp, downloading the model, quant choices,
+> MTP speculative decoding, and measured Metal benchmarks. Nothing in these
+> dotfiles reads that directory; only this documentation points at it. It is
+> intended to move to its own remote and be cloned by `external-repos.json`,
+> the way the Neovim config already is.
+>
+> A machine that is only a *client* needs nothing from there. Everything a
+> client requires is below.
 
-```bash
-# 1. Install llama.cpp. Homebrew's build is Metal-enabled on Apple Silicon
-#    (ggml only disables Metal on Intel) and ships llama-server.
-brew install llama.cpp
-
-# 2. Download the model (~20 GB: weights + vision projector + MTP draft)
-hf download unsloth/Qwen3.8-27B-GGUF \
-    --include "*UD-Q4_K_XL*" --include "*mmproj-BF16*" --include "MTP/*" \
-    --local-dir ~/.huggingface/Qwen
-```
-
-Build from source instead (`cmake -B build -DBUILD_SHARED_LIBS=OFF
--DGGML_CUDA=OFF && cmake --build build --config Release -j --target
-llama-server`) only when you need Metal kernels newer than Homebrew's pinned
-release -- see "Performance" below. On a Homebrew prefix other than
-`/opt/homebrew`, note that the `ggml` and `openssl@3` bottles are not
-relocatable and will compile from source regardless.
+#### Client setup (what this repo provides)
 
 The pi coding agent is pinned in `mise/config.toml`
-(`npm:@earendil-works/pi-coding-agent`), so `./reapply.sh` installs it on both
-machines -- no `npm link` step.
-
-### Usage
-
-```bash
-# Start the local LLM server (terminal 1)
-~/.config/llama-server/models/qwen3.8-27b.sh coding
-
-# Quick question (terminal 2)
-ask "What does EINTR mean?"
-
-# Interactive coding session
-pi-local "Help me refactor this" @file.py
-```
-
-Profiles: `coding` (default), `thinking`, `instruct`. See
-`~/.config/llama-server/README.md` for details, including quant choices and
-MTP speculative decoding.
-
-### Using the host's model from the VM
+(`npm:@earendil-works/pi-coding-agent`), so `./reapply.sh` installs it -- no
+`npm link` step.
 
 `models.json` defines two providers against the same server, because this
 repository is stowed on both machines and pi neither layers `models.json` per
@@ -589,48 +564,21 @@ an **untracked** `~/.zprofile.d/25-local-llama-provider.zsh`; the `.zprofile`
 loader globs `*.zsh`, so a machine-local file coexists with the stowed
 symlinks without being versioned.
 
-On the host, start the server on the bridge address so the VM can reach it:
-
 ```bash
-LLAMA_HOST=192.168.64.1 ~/.config/llama-server/models/qwen3.8-27b.sh coding
+# Quick question
+ask "What does EINTR mean?"
+
+# Interactive coding session
+pi-local "Help me refactor this" @file.py
 ```
 
-`192.168.64.1` rather than `0.0.0.0`: llama-server has no authentication, and
-the bridge address exposes it to the VM only, not to Wi-Fi/Ethernet.
+Verify connectivity from the client with
+`curl -s http://192.168.64.1:8001/health`. A `capabilities` list containing
+`multimodal` in `/v1/models` confirms the vision projector loaded.
 
-Verify from the VM with `curl -s http://192.168.64.1:8001/health`. A
-`capabilities` list containing `multimodal` in `/v1/models` confirms the
-vision projector loaded.
-
-### Performance notes (measured, M3 Max + Metal)
-
-Benchmarked with `llama-bench -p 512 -n 64` on Homebrew llama.cpp `b10809`,
-Qwen3.8-27B `UD-Q4_K_XL`:
-
-| Config | pp512 | tg64 |
-|--------|-------|------|
-| `-ngl 99` (default) | 108 t/s | 7.9 t/s |
-| `-ngl 0` (CPU only) | 15 t/s | 4.1 t/s |
-| `-fa 1` | 105 t/s | 7.8 t/s |
-
-Conclusions, so these are not re-litigated:
-
-- **Metal works.** Offload is a 7.3x speedup on prompt processing. A loaded
-  `MTL` backend line in the startup log is not by itself proof of that; the
-  `-ngl 0` comparison is.
-- **Flash attention changes nothing here** -- it is already engaged.
-- **The f16 KV cache matters.** Qwen3.6's script used `--cache-type-k/v q8_0`;
-  dropping it took generation from 7.1 to 9.3 tok/s. This machine does not
-  need the memory saving, so the launcher now defaults to f16
-  (`LLAMA_KV_Q8=1` trades back).
-- **MTP earns its keep**: 199/199 draft tokens accepted on predictable output,
-  so interactive use feels faster than tg64 suggests.
-- Generation is bandwidth-bound: roughly 300 GB/s divided by the 16.3 GiB of
-  weights caps it near 18 tok/s, so a smaller quant is the direct lever on
-  speed. Prompt processing is the weak spot and is likely immature Metal
-  kernels for this architecture (llama.cpp calls it `qwen35`); a source build
-  of master is the thing to try if it matters.
-
+Keep `contextWindow` in `models.json` consistent with the `--ctx-size` the
+server actually runs; pi otherwise believes it has more context than exists
+and long sessions fail server-side instead of being truncated by the client.
 ## Tests
 
 Three scenarios cover the deploy end to end -- a full apply from scratch, a
