@@ -255,7 +255,11 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
 - **`.zprofile`** - thin loader, sources `.zprofile.d/*.zsh` in filename order
 - **`.zprofile.d/05-local-bin-path.zsh`** - `~/.local/bin` on PATH
 - **`.zprofile.d/10-editor-history.zsh`** - EDITOR, history settings, nvim aliases
-- **`.zprofile.d/20-pi-aliases.zsh`** - local LLM / pi agent aliases
+- **`.zprofile.d/20-agent-aliases.zsh`** - local LLM / pi agent helpers
+  (`ask`, `ask-think`, `pi-local`) plus `localClaude`. A machine may override
+  `PI_LLAMA_PROVIDER` / `PI_LLAMA_URL` from an untracked
+  `~/.zprofile.d/25-local-llama-provider.zsh` -- that is how the VM points at
+  the host's llama-server instead of its own loopback.
 - **`.zprofile.d/30-system-helpers.zsh`** - `diskcheck` helper
 - **`.zprofile.d/45-nix.zsh`** - Linux only (guarded on `$OSTYPE`): sources
   the single-user Nix profile, puts the realised

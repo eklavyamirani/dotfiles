@@ -1,7 +1,26 @@
-# Local Qwen3.6 via pi coding agent
-alias ask='pi --model llama/qwen3.6-27b --thinking off -p'
-alias ask-think='pi --model llama/qwen3.6-27b -p'
-alias pi-local='pi --model llama/qwen3.6-27b'
+# Local Qwen3.8 via pi coding agent
+#
+# The same llama-server is reached under two names depending on which machine
+# this snippet is running on, because dotfiles is stowed on both the M3 Max
+# host and the VM it hosts:
+#
+#   host -> provider "llama",      http://localhost:8001
+#   VM   -> provider "llama-host", http://192.168.64.1:8001
+#
+# The host is the default. The VM overrides these variables from an untracked
+# ~/.zprofile.d/25-local-llama-provider.zsh -- the loader globs *.zsh, so a
+# machine-local file sits alongside the stowed symlinks without being
+# versioned. Provider names come from packages/common/.pi/agent/models.json.
+: "${PI_LLAMA_PROVIDER:=llama}"
+: "${PI_LLAMA_URL:=http://localhost:8001}"
+: "${PI_LLAMA_MODEL:=qwen3.8-27b}"
+export PI_LLAMA_PROVIDER PI_LLAMA_URL PI_LLAMA_MODEL
+
+# Functions, not aliases: the model string is built from variables at call
+# time, so a machine-local override applies without re-defining these.
+ask()       { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" --thinking off -p "$@"; }
+ask-think() { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" -p "$@"; }
+pi-local()  { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" "$@"; }
 
 # GitHub Copilot with Claude Sonnet 5 at its lowest supported effort
 alias ask-copilot='copilot --model claude-sonnet-5 --effort low -p --allow-all-tools'
@@ -14,7 +33,7 @@ localClaude() {
     return 1
   fi
 
-  export ANTHROPIC_BASE_URL=http://localhost:8001
+  export ANTHROPIC_BASE_URL="$PI_LLAMA_URL"
   export ANTHROPIC_API_KEY='sk-no-key-required'
   # Explicit rather than relying on the `claude` alias above: zsh expands
   # aliases inside function bodies at parse time, so the flag would be
