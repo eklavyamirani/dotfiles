@@ -163,7 +163,7 @@ profile is archived here (not live) pending a move to its own repository.
     always tracks the tip of the configured branch. Not a git submodule.
   - Neovim config (external repo, see above), pi agent config.
   - **llama-server configs are NOT in this repo.** They live in
-    `eklavyamirani/llama-server-config`, cloned to `~/.config/llama-server`,
+    `eklavyamirani/llama-cpp-config`, cloned to `~/.config/llama-server`,
     and are needed only by machines that actually serve a model. No code path
     here reads that directory -- only documentation references it. Do not
     re-add server launcher scripts or sampling profiles to `packages/`, and

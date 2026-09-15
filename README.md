@@ -532,7 +532,7 @@ VM (192.168.64.5)                      HOST (192.168.64.1, M3 Max 96 GB)
 ```
 
 > **Server-side configuration lives outside this repository:**
-> [eklavyamirani/llama-server-config](https://github.com/eklavyamirani/llama-server-config)
+> [eklavyamirani/llama-cpp-config](https://github.com/eklavyamirani/llama-cpp-config)
 >
 > The llama-server launcher scripts and sampling profiles are a self-contained
 > repo, deployed to **`~/.config/llama-server`** -- see its `README.md` for
@@ -545,7 +545,7 @@ VM (192.168.64.5)                      HOST (192.168.64.1, M3 Max 96 GB)
 > machine. Clone it by hand where it is wanted:
 >
 > ```bash
-> git clone https://github.com/eklavyamirani/llama-server-config \
+> git clone https://github.com/eklavyamirani/llama-cpp-config \
 >     ~/.config/llama-server
 > ```
 >
