@@ -585,6 +585,32 @@ Verify connectivity from the client with
 `curl -s http://192.168.64.1:8001/health`. A `capabilities` list containing
 `multimodal` in `/v1/models` confirms the vision projector loaded.
 
+#### Working effectively with a local model
+
+Measured against this setup, not general advice:
+
+- **Prompt processing is the bottleneck, not generation** (108 tok/s vs ~10).
+  A 16K-token agent context costs roughly 150s to reprocess *before the first
+  output token*. Optimising for generation speed is largely a red herring.
+- **Prefix caching works and is worth protecting.** A repeated prefix reused
+  1099 tokens and cut prompt time 17.2s -> 5.4s. It only helps while the
+  prefix is stable, so prefer `--continue` over fresh one-shot runs, keep the
+  system prompt fixed between turns, and be sparing with `@file` includes --
+  an unnecessary 5K-token file costs ~46s on *every* turn it stays in context.
+- **Give one deliverable per run.** A single prompt covering an HTTP API, an
+  HTML page, its JS, and a test suite took 16 minutes and emitted nothing for
+  the first 8. Splitting the same work into harden -> build -> validate ran
+  better and left checkpoints to verify between.
+- **Always end with a runnable verification command** ("then run
+  `python3 -m unittest discover` and fix anything that fails"). This is the
+  single highest-value thing in a prompt: it closes the loop and the model
+  finds its own bugs. Say explicitly to fix the code rather than the test.
+- **Thinking is spent before any answer appears.** With a small max-tokens
+  budget it can consume the whole allowance and return empty content. Use
+  `ask` / `pi-fast` for mechanical work; keep thinking for design.
+- The server allocates `total_slots` KV caches but an agent session uses one.
+  For single-user work `-np 1` reclaims the rest.
+
 Keep `contextWindow` in `models.json` consistent with the `--ctx-size` the
 server actually runs; pi otherwise believes it has more context than exists
 and long sessions fail server-side instead of being truncated by the client.
