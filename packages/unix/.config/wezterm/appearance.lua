@@ -72,10 +72,37 @@ function M.apply(config)
   config.tab_max_width = 32
   config.show_new_tab_button_in_tab_bar = false
 
+  -- ---- Tab bar colours ----------------------------------------------
+  -- The bar is deliberately NOT transparent. A transparent bar over the
+  -- 0.88 window opacity and the macOS blur puts tab text directly on top
+  -- of whatever is on the desktop, and Catppuccin's dim inactive-tab
+  -- colour loses against a busy background -- the contrast is bad enough
+  -- that the tabs stop being readable at a glance, which is the only
+  -- thing a tab bar is for.
+  --
+  -- Solid colours here composite over the window transparency rather than
+  -- through it (an explicitly coloured cell background is drawn opaque),
+  -- so the bar reads as a stable chrome strip while the terminal body
+  -- below it stays translucent.
+  --
+  -- The ladder is Catppuccin Mocha's own surface ramp, darkest at the
+  -- back: crust for the empty strip, mantle for inactive tabs, and base
+  -- for the active tab -- base being exactly the terminal background, so
+  -- the active tab reads as continuous with the body under it.
+  local CRUST = '#11111b'
+  local MANTLE = '#181825'
+  local BASE = '#1e1e2e'
+  local SURFACE = '#313244'
+
   config.colors = {
     tab_bar = {
-      background = 'rgba(0,0,0,0)',
-      inactive_tab_edge = 'rgba(0,0,0,0)',
+      background = CRUST,
+      inactive_tab_edge = CRUST,
+      active_tab = { bg_color = BASE, fg_color = M.scheme.foreground },
+      inactive_tab = { bg_color = MANTLE, fg_color = M.scheme.brights[1] },
+      inactive_tab_hover = { bg_color = SURFACE, fg_color = M.scheme.foreground },
+      new_tab = { bg_color = MANTLE, fg_color = M.scheme.brights[1] },
+      new_tab_hover = { bg_color = SURFACE, fg_color = M.scheme.foreground },
     },
   }
 
