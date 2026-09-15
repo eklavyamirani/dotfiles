@@ -589,14 +589,17 @@ Verify connectivity from the client with
 
 Measured against this setup, not general advice:
 
-- **Prompt processing is the bottleneck, not generation** (108 tok/s vs ~10).
-  A 16K-token agent context costs roughly 150s to reprocess *before the first
-  output token*. Optimising for generation speed is largely a red herring.
+- **Set the host to High Power first.** macOS Low Power mode costs ~40% of
+  throughput (9.3 -> 15.7 tok/s generation, 105 -> 138 tok/s prompt) and
+  reports nothing unusual while throttled. It is worth more than any flag.
+- **Prompt processing is the bottleneck, not generation** (138 tok/s vs ~16).
+  A 16K-token agent context costs roughly 2 minutes to reprocess *before the
+  first output token*. Optimising generation speed is largely a red herring.
 - **Prefix caching works and is worth protecting.** A repeated prefix reused
   1099 tokens and cut prompt time 17.2s -> 5.4s. It only helps while the
   prefix is stable, so prefer `--continue` over fresh one-shot runs, keep the
   system prompt fixed between turns, and be sparing with `@file` includes --
-  an unnecessary 5K-token file costs ~46s on *every* turn it stays in context.
+  an unnecessary 5K-token file costs ~36s on *every* turn it stays in context.
 - **Give one deliverable per run.** A single prompt covering an HTTP API, an
   HTML page, its JS, and a test suite took 16 minutes and emitted nothing for
   the first 8. Splitting the same work into harden -> build -> validate ran
