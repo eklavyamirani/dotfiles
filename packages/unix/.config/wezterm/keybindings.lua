@@ -15,8 +15,53 @@
 
 local wezterm = require 'wezterm'
 local act = wezterm.action
+local agent_status = require 'agent_status'
 
 local M = {}
+
+-- ---- vertical tab list ---------------------------------------------
+-- WezTerm has no vertical tab bar: the retro bar is drawn as one row of
+-- the terminal grid and there is no `tab_bar_at_left` to set. The closest
+-- honest equivalent is an overlay -- InputSelector draws a vertical,
+-- fuzzy-filterable list over the terminal, which gives the two properties
+-- a sidebar would: tabs stacked vertically with room for a real label,
+-- and expand/collapse (LEADER Tab opens it, Escape closes it) without
+-- permanently spending columns on a sidebar that is only useful while you
+-- are deciding where to go.
+--
+-- Built fresh on every invocation rather than cached: the agent glyph and
+-- working directory in each row are only true at the moment the list is
+-- opened.
+local function tab_list(window, pane)
+  local tabs = window:mux_window():tabs_with_info()
+  local choices = {}
+  for _, info in ipairs(tabs) do
+    table.insert(choices, {
+      label = agent_status.mux_tab_label(info),
+      -- InputSelector ids are strings; the index round-trips through
+      -- tostring so the callback can activate the tab by position.
+      id = tostring(info.index),
+    })
+  end
+
+  window:perform_action(
+    act.InputSelector {
+      title = 'Tabs',
+      choices = choices,
+      fuzzy = true,
+      fuzzy_description = 'Tab: ',
+      action = wezterm.action_callback(function(inner_window, inner_pane, id)
+        -- id is nil when the selector is dismissed with Escape, which is
+        -- the "collapse" half of this binding -- do nothing and leave the
+        -- current tab active.
+        if id then
+          inner_window:perform_action(act.ActivateTab(tonumber(id)), inner_pane)
+        end
+      end),
+    },
+    pane
+  )
+end
 
 -- tmux's prefix has no timeout. WezTerm requires one, so it is set long
 -- enough that it never expires mid-thought.
@@ -73,6 +118,11 @@ function M.apply(config)
     { key = 'n', mods = 'LEADER', action = act.ActivateTabRelative(1) },
     { key = 'p', mods = 'LEADER', action = act.ActivateTabRelative(-1) },
     { key = 'w', mods = 'LEADER', action = act.ShowTabNavigator },
+    -- Vertical tab list: expand with LEADER Tab, collapse with Escape.
+    -- Kept alongside ShowTabNavigator rather than replacing it -- the
+    -- navigator is WezTerm's built-in and keeps working if the overlay
+    -- above ever breaks on an upgrade.
+    { key = 'Tab', mods = 'LEADER', action = wezterm.action_callback(tab_list) },
     {
       key = ',',
       mods = 'LEADER',
@@ -138,6 +188,33 @@ function M.apply(config)
     table.insert(keys, { key = tostring(i), mods = 'LEADER', action = act.ActivateTab(i - 1) })
   end
   table.insert(keys, { key = '0', mods = 'LEADER', action = act.ActivateTab(9) })
+
+  -- LEADER CTRL-1..9 jump straight to a workspace, matching the digits
+  -- drawn on the chips in the left status area (see agent_status.lua).
+  -- This is the "switch quickly" half of the workspace browser: the strip
+  -- shows you what exists, the digit gets you there without opening a
+  -- chooser at all.
+  --
+  -- CTRL is what keeps these clear of LEADER 1..9 above, which are tabs.
+  -- The nesting matches the vocabulary everywhere else here: a bare digit
+  -- moves within the session, a modified one moves between sessions.
+  --
+  -- Ordering note: this reads get_workspace_names() at *press* time, not
+  -- at config load, so a workspace created after startup is reachable by
+  -- its digit immediately. The list is sorted by WezTerm, so a chip's
+  -- number is stable as long as the set of workspaces is.
+  for i = 1, 9 do
+    table.insert(keys, {
+      key = tostring(i),
+      mods = 'LEADER|CTRL',
+      action = wezterm.action_callback(function(window, pane)
+        local names = wezterm.mux.get_workspace_names()
+        if names[i] then
+          window:perform_action(act.SwitchToWorkspace { name = names[i] }, pane)
+        end
+      end),
+    })
+  end
 
   config.keys = keys
 
