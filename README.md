@@ -3,7 +3,7 @@
 Stow-based dotfiles for an isolated, non-admin macOS account
 that owns all development tooling (CLI tools and
 runtimes pinned with mise; an isolated Homebrew in `~/.homebrew`, no sudo
-required; neovim; pi/llama-server configs). The paired
+required; neovim; pi agent config). The paired
 main/admin account is deliberately minimal and its profile is kept only as
 a frozen snapshot in `archive/admin/` (see its README) until it moves to
 its own repository.
@@ -509,8 +509,8 @@ and the exit code is non-zero if anything failed.
 
 `.gitignore` ignores all of `packages/*/.config/*` by default and explicitly
 un-ignores only the specific configs meant to be tracked (currently
-`terminal/`, `wezterm/`, `llama-server/`, `mise/config.toml`,
-`external-repos.json`). This is deliberate:
+`terminal/`, `wezterm/`, `mise/config.toml`, `external-repos.json`). This is
+deliberate:
 many CLI tools write credential/token files into their `~/.config/<tool>`
 directory over time (OAuth tokens, API keys, session state), and a
 blocklist approach requires remembering to add every such path -- one
@@ -518,42 +518,102 @@ missed entry and a `git add -A` silently commits a secret. To track a new
 tool's config, add explicit `!packages/<pkg>/.config/<tool>/` and
 `!packages/<pkg>/.config/<tool>/**` un-ignore lines to `.gitignore`.
 
-### Local LLM setup (Qwen3.6-27B + pi agent)
+### Local LLM (Qwen3.8-27B + pi agent)
 
-After stowing `dev`, run these one-time steps:
+**Architecture: llama.cpp runs on the Mac host; the VM is an HTTP client.**
+Inference never happens in the VM -- it has neither the RAM nor GPU access.
+Any Apple Silicon Mac with enough memory for the model can serve it; the
+numbers below happen to come from an M3 Max.
+The VM talks to the host's OpenAI-compatible endpoint over the host-only
+bridge. Nothing is tunnelled and there is no SSH dependency.
 
-```bash
-# 1. Download the model (~18 GB)
-hf download unsloth/Qwen3.6-27B-MTP-GGUF \
-    --include "*UD-Q4_K_XL*" --include "*mmproj*" \
-    --local-dir ~/.huggingface/unsloth/Qwen3.6-27B-MTP-GGUF
-
-# 2. Build llama.cpp (Metal enabled by default on Mac)
-cd ~/repositories/llama.cpp
-cmake -B build -DBUILD_SHARED_LIBS=OFF -DGGML_CUDA=OFF
-cmake --build build --config Release -j --target llama-server
-
-# 3. Link pi coding agent globally
-cd ~/repositories/pi/packages/coding-agent
-npm link
+```
+VM (192.168.64.5)                      HOST (192.168.64.1, Apple Silicon)
+  pi / ask ---- HTTP /v1 ------------>  llama-server --host 192.168.64.1
+  provider "llama"                      Qwen3.8-27B Q4_K_XL + Metal
 ```
 
-### Usage
+> **Server-side configuration lives outside this repository:**
+> [eklavyamirani/llama-cpp-config](https://github.com/eklavyamirani/llama-cpp-config)
+>
+> The llama-server launcher scripts and sampling profiles are a self-contained
+> repo, deployed to **`~/.config/llama-server`** -- see its `README.md` for
+> installing llama.cpp, downloading the model, quant choices, MTP speculative
+> decoding, and measured Metal benchmarks. Nothing in these dotfiles reads
+> that directory; only this documentation points at it.
+>
+> It is deliberately *not* wired into `external-repos.json`: only a machine
+> that actually serves a model needs it, and that manifest is synced on every
+> machine. Clone it by hand where it is wanted:
+>
+> ```bash
+> git clone https://github.com/eklavyamirani/llama-cpp-config \
+>     ~/.config/llama-server
+> ```
+>
+> A machine that is only a *client* needs nothing from there. Everything a
+> client requires is below.
+
+#### Client setup (what this repo provides)
+
+The pi coding agent is pinned in `mise/config.toml`
+(`npm:@earendil-works/pi-coding-agent`), so `./reapply.sh` installs it -- no
+`npm link` step.
+
+`models.json` defines one provider, `llama`, pointing at
+`http://192.168.64.1:8001/v1` -- the host's address on the bridge. There is no
+localhost variant because this repository is never deployed on the machine
+serving the model.
+
+`ask` / `ask-think` / `pi-local` / `pi-fast` build the model string from
+`$PI_LLAMA_MODEL` (default `llama/qwen3.8-27b`), and `$PI_LLAMA_URL` carries
+the same endpoint for `localClaude`. Override either if the host address
+changes or you serve a second model.
 
 ```bash
-# Start the local LLM server (terminal 1)
-~/.config/llama-server/models/qwen3.6-27b.sh coding
-
-# Quick question (terminal 2)
+# Quick question
 ask "What does EINTR mean?"
 
 # Interactive coding session
 pi-local "Help me refactor this" @file.py
 ```
 
-Profiles: `coding` (default), `thinking`, `instruct`. See
-`~/.config/llama-server/README.md` for details.
+Verify connectivity from the client with
+`curl -s http://192.168.64.1:8001/health`. A `capabilities` list containing
+`multimodal` in `/v1/models` confirms the vision projector loaded.
 
+#### Working effectively with a local model
+
+Measured against this setup, not general advice:
+
+- **Set the host to High Power first.** macOS Low Power mode costs ~40% of
+  throughput (9.3 -> 15.7 tok/s generation, 105 -> 138 tok/s prompt) and
+  reports nothing unusual while throttled. It is worth more than any flag.
+- **Prompt processing is the bottleneck, not generation** (138 tok/s vs ~16).
+  A 16K-token agent context costs roughly 2 minutes to reprocess *before the
+  first output token*. Optimising generation speed is largely a red herring.
+- **Prefix caching works and is worth protecting.** A repeated prefix reused
+  1099 tokens and cut prompt time 17.2s -> 5.4s. It only helps while the
+  prefix is stable, so prefer `--continue` over fresh one-shot runs, keep the
+  system prompt fixed between turns, and be sparing with `@file` includes --
+  an unnecessary 5K-token file costs ~36s on *every* turn it stays in context.
+- **Give one deliverable per run.** A single prompt covering an HTTP API, an
+  HTML page, its JS, and a test suite took 16 minutes and emitted nothing for
+  the first 8. Splitting the same work into harden -> build -> validate ran
+  better and left checkpoints to verify between.
+- **Always end with a runnable verification command** ("then run
+  `python3 -m unittest discover` and fix anything that fails"). This is the
+  single highest-value thing in a prompt: it closes the loop and the model
+  finds its own bugs. Say explicitly to fix the code rather than the test.
+- **Thinking is spent before any answer appears.** With a small max-tokens
+  budget it can consume the whole allowance and return empty content. Use
+  `ask` / `pi-fast` for mechanical work; keep thinking for design.
+- The server allocates `total_slots` KV caches but an agent session uses one.
+  For single-user work `-np 1` reclaims the rest.
+
+Keep `contextWindow` in `models.json` consistent with the `--ctx-size` the
+server actually runs; pi otherwise believes it has more context than exists
+and long sessions fail server-side instead of being truncated by the client.
 ## Tests
 
 Three scenarios cover the deploy end to end -- a full apply from scratch, a

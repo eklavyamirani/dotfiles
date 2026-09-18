@@ -17,8 +17,10 @@ packages/*/.config/*
 !packages/unix/.config/wezterm/
 !packages/unix/.config/wezterm/**
 
-!packages/unix/.config/llama-server/
-!packages/unix/.config/llama-server/**
+# llama-server configs are NOT tracked here: they live in their own
+# self-contained repository deployed to ~/.config/llama-server. Only machines
+# that serve a model need them, and no dotfiles code path references that
+# directory.
 
 !packages/common/.config/external-repos.json
 

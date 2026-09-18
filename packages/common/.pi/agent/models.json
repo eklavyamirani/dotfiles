@@ -1,14 +1,27 @@
 {
   // Custom models for pi coding agent
   // Docs: https://github.com/earendil-works/pi-mono/packages/ai
+  //
+  // This repository deploys to the VM only; the Mac host does not use these
+  // dotfiles. So there is one provider and it points at the host across the
+  // host-only bridge -- no localhost variant, because nothing here ever runs
+  // on the machine serving the model.
+  //
+  // Requires llama-server started with LLAMA_HOST=192.168.64.1 (it binds
+  // loopback by default). Server-side config lives in
+  // github.com/eklavyamirani/llama-cpp-config.
+  //
+  // contextWindow must match the server's actual --ctx-size: pi otherwise
+  // believes it has more room than exists and long sessions fail server-side
+  // instead of being truncated by the client.
   "providers": {
     "llama": {
-      "baseUrl": "http://localhost:8001/v1",
+      "baseUrl": "http://192.168.64.1:8001/v1",
       "apiKey": "sk-no-key-required",
       "models": [
         {
-          "id": "qwen3.6-27b",
-          "name": "Qwen3.6-27B (local, UD-Q4_K_XL + MTP)",
+          "id": "qwen3.8-27b",
+          "name": "Qwen3.8-27B (host, UD-Q4_K_XL + MTP)",
           "api": "openai-completions",
           "reasoning": true,
           "input": ["text", "image"],

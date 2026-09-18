@@ -161,7 +161,14 @@ profile is archived here (not live) pending a move to its own repository.
     (currently just the Neovim config), so they stay deployable standalone
     on machines that don't want the rest of this repo. No commit pinning —
     always tracks the tip of the configured branch. Not a git submodule.
-  - Neovim config (external repo, see above), pi agent / llama-server configs.
+  - Neovim config (external repo, see above), pi agent config.
+  - **llama-server configs are NOT in this repo.** They live in
+    `eklavyamirani/llama-cpp-config`, cloned to `~/.config/llama-server`,
+    and are needed only by machines that actually serve a model. No code path
+    here reads that directory -- only documentation references it. Do not
+    re-add server launcher scripts or sampling profiles to `packages/`, and
+    do not add it to `external-repos.json`: that manifest syncs on every
+    machine, including client-only ones that have no use for it.
 
 ## Setup Instructions
 
@@ -255,7 +262,14 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
 - **`.zprofile`** - thin loader, sources `.zprofile.d/*.zsh` in filename order
 - **`.zprofile.d/05-local-bin-path.zsh`** - `~/.local/bin` on PATH
 - **`.zprofile.d/10-editor-history.zsh`** - EDITOR, history settings, nvim aliases
-- **`.zprofile.d/20-pi-aliases.zsh`** - local LLM / pi agent aliases
+- **`.zprofile.d/20-agent-aliases.zsh`** - local LLM / pi agent helpers
+  (`ask`, `ask-think`, `pi-local`, `pi-fast`) plus `localClaude`. The one-shot
+  `-p` helpers redirect stdin from `/dev/null` -- pi hangs silently forever
+  reading stdin when it has no TTY, so never remove that. The interactive ones
+  must not have it. The model string comes from `$PI_LLAMA_MODEL` and
+  `$PI_LLAMA_URL`, both pointing at the Mac host across the bridge. **These
+  dotfiles deploy to the VM only** -- the host does not use this repository, so
+  there is no localhost provider and no per-machine switching to build.
 - **`.zprofile.d/30-system-helpers.zsh`** - `diskcheck` helper
 - **`.zprofile.d/45-nix.zsh`** - Linux only (guarded on `$OSTYPE`): sources
   the single-user Nix profile, puts the realised
