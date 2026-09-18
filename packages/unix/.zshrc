@@ -12,7 +12,17 @@
 #
 # Guarded by the sentinel .zprofile exports, so a login shell does not source
 # it twice and a subshell does not repeat it.
-if [[ -z "${_DOTFILES_PROFILE_LOADED:-}" && -r "$HOME/.zprofile" ]]; then
+#
+# The sentinel alone is not enough. It is exported, so every child process
+# inherits it -- including one whose PATH was replaced or scrubbed on the way
+# in (env -i, a sudo/ssh invocation, an editor or CI runner that sets its own
+# PATH). Such a shell would claim the chain had run while having none of its
+# effects, which is worse than not running it at all: silent and total. So the
+# guard also checks that the chain's most basic effect is still present. If
+# ~/.local/bin has gone missing from PATH, the inherited sentinel is stale and
+# the chain is loaded again.
+if [[ -r "$HOME/.zprofile" ]] &&
+   { [[ -z "${_DOTFILES_PROFILE_LOADED:-}" ]] || [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; }; then
   source "$HOME/.zprofile"
 fi
 
