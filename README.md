@@ -520,15 +520,17 @@ tool's config, add explicit `!packages/<pkg>/.config/<tool>/` and
 
 ### Local LLM (Qwen3.8-27B + pi agent)
 
-**Architecture: llama.cpp runs on the M3 Max host; the VM is an HTTP client.**
+**Architecture: llama.cpp runs on the Mac host; the VM is an HTTP client.**
 Inference never happens in the VM -- it has neither the RAM nor GPU access.
+Any Apple Silicon Mac with enough memory for the model can serve it; the
+numbers below happen to come from an M3 Max.
 The VM talks to the host's OpenAI-compatible endpoint over the host-only
 bridge. Nothing is tunnelled and there is no SSH dependency.
 
 ```
-VM (192.168.64.5)                      HOST (192.168.64.1, M3 Max 96 GB)
+VM (192.168.64.5)                      HOST (192.168.64.1, Apple Silicon)
   pi / ask ---- HTTP /v1 ------------>  llama-server --host 192.168.64.1
-  provider "llama-host"                 Qwen3.8-27B Q4_K_XL + Metal
+  provider "llama"                      Qwen3.8-27B Q4_K_XL + Metal
 ```
 
 > **Server-side configuration lives outside this repository:**
@@ -558,20 +560,15 @@ The pi coding agent is pinned in `mise/config.toml`
 (`npm:@earendil-works/pi-coding-agent`), so `./reapply.sh` installs it -- no
 `npm link` step.
 
-`models.json` defines two providers against the same server, because this
-repository is stowed on both machines and pi neither layers `models.json` per
-machine nor expands environment variables in `baseUrl`:
+`models.json` defines one provider, `llama`, pointing at
+`http://192.168.64.1:8001/v1` -- the host's address on the bridge. There is no
+localhost variant because this repository is never deployed on the machine
+serving the model.
 
-| Machine | Provider | baseUrl |
-|---------|----------|---------|
-| M3 Max host | `llama` | `http://localhost:8001/v1` |
-| VM | `llama-host` | `http://192.168.64.1:8001/v1` |
-
-`ask` / `ask-think` / `pi-local` are functions that build the model string
-from `$PI_LLAMA_PROVIDER`, which defaults to `llama`. The VM overrides it in
-an **untracked** `~/.zprofile.d/25-local-llama-provider.zsh`; the `.zprofile`
-loader globs `*.zsh`, so a machine-local file coexists with the stowed
-symlinks without being versioned.
+`ask` / `ask-think` / `pi-local` / `pi-fast` build the model string from
+`$PI_LLAMA_MODEL` (default `llama/qwen3.8-27b`), and `$PI_LLAMA_URL` carries
+the same endpoint for `localClaude`. Override either if the host address
+changes or you serve a second model.
 
 ```bash
 # Quick question

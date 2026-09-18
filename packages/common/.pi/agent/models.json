@@ -2,42 +2,26 @@
   // Custom models for pi coding agent
   // Docs: https://github.com/earendil-works/pi-mono/packages/ai
   //
-  // Two providers point at the SAME llama-server, over different addresses,
-  // because this file is stowed on both the M3 Max host and the VM it hosts:
+  // This repository deploys to the VM only; the Mac host does not use these
+  // dotfiles. So there is one provider and it points at the host across the
+  // host-only bridge -- no localhost variant, because nothing here ever runs
+  // on the machine serving the model.
   //
-  //   llama       -> localhost      : use on the machine running llama-server
-  //   llama-host  -> 192.168.64.1   : use from the VM (host's address on the
-  //                                   host-only bridge). Requires the server
-  //                                   to be started with LLAMA_HOST=192.168.64.1
-  //                                   (see ~/.config/llama-server/README.md).
+  // Requires llama-server started with LLAMA_HOST=192.168.64.1 (it binds
+  // loopback by default). Server-side config lives in
+  // github.com/eklavyamirani/llama-cpp-config.
   //
-  // pi resolves models.json from a single file with no per-machine layering,
-  // and does not expand environment variables in baseUrl, so the machine
-  // difference is carried in the provider name rather than in this URL.
+  // contextWindow must match the server's actual --ctx-size: pi otherwise
+  // believes it has more room than exists and long sessions fail server-side
+  // instead of being truncated by the client.
   "providers": {
     "llama": {
-      "baseUrl": "http://localhost:8001/v1",
-      "apiKey": "sk-no-key-required",
-      "models": [
-        {
-          "id": "qwen3.8-27b",
-          "name": "Qwen3.8-27B (local, UD-Q4_K_XL + MTP)",
-          "api": "openai-completions",
-          "reasoning": true,
-          "input": ["text", "image"],
-          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-          "contextWindow": 65536,
-          "maxTokens": 65536
-        }
-      ]
-    },
-    "llama-host": {
       "baseUrl": "http://192.168.64.1:8001/v1",
       "apiKey": "sk-no-key-required",
       "models": [
         {
           "id": "qwen3.8-27b",
-          "name": "Qwen3.8-27B (host M3 Max, UD-Q4_K_XL + MTP)",
+          "name": "Qwen3.8-27B (host, UD-Q4_K_XL + MTP)",
           "api": "openai-completions",
           "reasoning": true,
           "input": ["text", "image"],

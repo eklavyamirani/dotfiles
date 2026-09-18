@@ -1,24 +1,14 @@
 # Local Qwen3.8 via pi coding agent
 #
-# The same llama-server is reached under two names depending on which machine
-# this snippet is running on, because dotfiles is stowed on both the M3 Max
-# host and the VM it hosts:
-#
-#   host -> provider "llama",      http://localhost:8001
-#   VM   -> provider "llama-host", http://192.168.64.1:8001
-#
-# The host is the default. The VM overrides these variables from an untracked
-# ~/.zprofile.d/25-local-llama-provider.zsh -- the loader globs *.zsh, so a
-# machine-local file sits alongside the stowed symlinks without being
-# versioned. Provider names come from packages/common/.pi/agent/models.json.
-: "${PI_LLAMA_PROVIDER:=llama}"
-: "${PI_LLAMA_URL:=http://localhost:8001}"
-: "${PI_LLAMA_MODEL:=qwen3.8-27b}"
-export PI_LLAMA_PROVIDER PI_LLAMA_URL PI_LLAMA_MODEL
+# These dotfiles deploy to the VM only. Inference runs on the Mac host, which
+# the VM reaches at 192.168.64.1 over the host-only bridge; the provider name
+# comes from packages/common/.pi/agent/models.json. Both variables are
+# overridable for the unusual case (a different host address, a second model),
+# but there is no per-machine switching to do -- nothing here runs on the host.
+: "${PI_LLAMA_MODEL:=llama/qwen3.8-27b}"
+: "${PI_LLAMA_URL:=http://192.168.64.1:8001}"
+export PI_LLAMA_MODEL PI_LLAMA_URL
 
-# Functions, not aliases: the model string is built from variables at call
-# time, so a machine-local override applies without re-defining these.
-#
 # The one-shot (-p) helpers redirect stdin from /dev/null. Without it, pi
 # blocks reading stdin whenever it has no TTY -- backgrounded, in a cron job,
 # under CI -- despite -p meaning non-interactive. It does not time out or warn:
@@ -27,14 +17,14 @@ export PI_LLAMA_PROVIDER PI_LLAMA_URL PI_LLAMA_MODEL
 #
 # pi-local and pi-fast are interactive and must NOT redirect stdin.
 #
-# Thinking costs real time on a local model (~10 tok/s here), and it is spent
+# Thinking costs real time on a local model (~16 tok/s here), and it is spent
 # before any answer appears -- a small max-tokens budget can be consumed
 # entirely by reasoning, returning empty content. So thinking is off for the
 # quick helpers and for pi-fast, and left on where the reasoning is the point.
-ask()       { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" --thinking off -p "$@" < /dev/null; }
-ask-think() { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" -p "$@" < /dev/null; }
-pi-local()  { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" "$@"; }
-pi-fast()   { pi --model "$PI_LLAMA_PROVIDER/$PI_LLAMA_MODEL" --thinking off "$@"; }
+ask()       { pi --model "$PI_LLAMA_MODEL" --thinking off -p "$@" < /dev/null; }
+ask-think() { pi --model "$PI_LLAMA_MODEL" -p "$@" < /dev/null; }
+pi-local()  { pi --model "$PI_LLAMA_MODEL" "$@"; }
+pi-fast()   { pi --model "$PI_LLAMA_MODEL" --thinking off "$@"; }
 
 # GitHub Copilot with Claude Sonnet 5 at its lowest supported effort
 alias ask-copilot='copilot --model claude-sonnet-5 --effort low -p --allow-all-tools'

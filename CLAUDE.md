@@ -266,10 +266,10 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
   (`ask`, `ask-think`, `pi-local`, `pi-fast`) plus `localClaude`. The one-shot
   `-p` helpers redirect stdin from `/dev/null` -- pi hangs silently forever
   reading stdin when it has no TTY, so never remove that. The interactive ones
-  must not have it. A machine may override
-  `PI_LLAMA_PROVIDER` / `PI_LLAMA_URL` from an untracked
-  `~/.zprofile.d/25-local-llama-provider.zsh` -- that is how the VM points at
-  the host's llama-server instead of its own loopback.
+  must not have it. The model string comes from `$PI_LLAMA_MODEL` and
+  `$PI_LLAMA_URL`, both pointing at the Mac host across the bridge. **These
+  dotfiles deploy to the VM only** -- the host does not use this repository, so
+  there is no localhost provider and no per-machine switching to build.
 - **`.zprofile.d/30-system-helpers.zsh`** - `diskcheck` helper
 - **`.zprofile.d/45-nix.zsh`** - Linux only (guarded on `$OSTYPE`): sources
   the single-user Nix profile, puts the realised
