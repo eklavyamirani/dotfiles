@@ -276,6 +276,13 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
   `~/.local/state/dotfiles/nix-env/bin` on PATH ahead of the mise snippet
   that depends on it, and carries a tripwire for a missing or
   garbage-collected environment
+- **`.zprofile.d/46-flatpak.zsh`** - Linux only: puts the flatpak export
+  directories on `XDG_DATA_DIRS` so the desktop environment can see exported
+  `.desktop` files. The distro does this from `/etc/profile.d/flatpak.sh`, which
+  nothing here reaches -- zsh comes from the flake, so there is no
+  `/etc/zsh/zprofile` sourcing `/etc/profile`, and the Nix zsh reads global rc
+  files from its own store prefix. Must sort after `45-nix.zsh`, whose `nix.sh`
+  rewrites `XDG_DATA_DIRS` when it finds it unset
 - **`.zprofile.d/50-homebrew-isolated.zsh`** - macOS only (guarded on
   `$OSTYPE`): isolated Homebrew shellenv,
   a `brew()` function pinning to `~/.homebrew` regardless of PATH ordering,
