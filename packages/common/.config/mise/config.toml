@@ -39,12 +39,12 @@ neovim       = "0.12.5"   # nvim
 tree-sitter  = "0.27.0"   # the CLI; :TSInstall compiles grammars with it
 colima       = "0.10.3"
 docker-cli   = "29.7.2"   # the `docker` client only -- plugins stay in Brewfile
-codex        = "0.153.4"
+codex        = "0.159.2"
+claude = "2.1.285"
 
 python       = "3.12.14"
-claude-code = "2.1.260"
-copilot-cli = "1.0.82"
 lima = "2.2.0"
 herdr = "0.8.2"
 node = "24.21.0"
 "npm:@earendil-works/pi-coding-agent" = "0.85.1"
+copilot = "1.0.89"
