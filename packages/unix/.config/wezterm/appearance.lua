@@ -44,6 +44,13 @@ function M.apply(config)
   -- font-fira-code-nerd-font is the one cask declared in manifests/macos/Brewfile.
   -- The Nerd Font variant matters here: the tab-title glyphs in
   -- agent_status.lua and the Neovim statusline both draw from it.
+  --
+  -- The cask installs into ~/Library/Fonts, but CoreText never registers
+  -- that directory for this isolated account, so a by-name lookup fails
+  -- and WezTerm logs a font error on every launch while silently falling
+  -- back to Menlo. Pointing font_dirs at it makes WezTerm load the files
+  -- itself, with no dependence on the system font registry.
+  config.font_dirs = { wezterm.home_dir .. '/Library/Fonts' }
   config.font = wezterm.font_with_fallback {
     'FiraCode Nerd Font',
     'Menlo', -- always present on macOS; keeps a fresh machine legible
