@@ -207,8 +207,16 @@ while IFS= read -r -d '' link; do
 # The Nix paths are pruned for speed, not correctness: nothing under them
 # points into this repository, but ~/.nix-profile and the environment out-link
 # both lead into /nix/store, where a descent would walk a very large tree.
+# The user folders are pruned for the opposite reason: on macOS they are
+# privacy-protected (TCC), so the first read of ~/Music or ~/Documents raises a
+# permission prompt and find blocks on it, indefinitely and silently, behind a
+# `tee`. No package deploys into them, so nothing stale can live there.
 done < <(find "$TARGET" -maxdepth 6 \
            \( -path "$TARGET/Library" -o -path "$TARGET/repositories" \
+              -o -path "$TARGET/Desktop" -o -path "$TARGET/Documents" \
+              -o -path "$TARGET/Downloads" -o -path "$TARGET/Music" \
+              -o -path "$TARGET/Movies" -o -path "$TARGET/Pictures" \
+              -o -path "$TARGET/.Trash" \
               -o -path "$TARGET/.homebrew" \
               -o -path "$TARGET/.nix-profile" -o -path "$TARGET/.nix-defexpr" \
               -o -path "$TARGET/.local/state/nix" -o -path "$NIX_ENV" \
