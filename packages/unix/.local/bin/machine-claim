@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# One claim at a time on something this machine has only one of.
+#
+# Several agent sessions share this machine. Two container-heavy jobs at once
+# stall it, and two sessions on the local test cluster overwrite each other.
+# A session takes a claim before such work and releases it after:
+#
+#   machine-claim take <resource> <who> <minutes> [--owner]
+#   machine-claim release <resource> <who>
+#   machine-claim check <resource> <who>
+#   machine-claim status
+#
+# <resource> is a short name everyone agrees on (docker, cluster). <who> is the
+# session's short name. A claim lasts <minutes> (1 to 240) and then counts as
+# free, so a session that died does not hold the machine.
+#
+# - take      exit 0: yours until the time printed. Taking a claim you already
+#             hold extends it. exit 1: someone else holds it (named, with the
+#             time it ends). exit 2 (--owner only): someone else holds it and
+#             it is now marked as wanted for you.
+# - check     exit 0: you hold it and nobody is waiting. exit 3: you hold it
+#             but the owner's session wants it: finish the step you are in and
+#             release. exit 1: you do not hold it.
+# - release   only the holder releases; releasing what you do not hold is exit 1.
+# - --owner   for a session the owner is driving. It never interrupts a running
+#             job: it marks the resource as wanted, which stops every other
+#             session from taking it and tells the holder (check, status).
+#
+# Concurrency: every command runs under one kernel file lock (flock on
+# $MACHINE_CLAIM_DIR/.lock, held by perl, python3 or flock(1), whichever is
+# installed), so two commands never interleave, and the kernel drops the lock
+# if a command dies. Claims are small files replaced whole through a rename.
+# A first version without the lock let several sessions win an expired claim
+# at once; tests/machine-claim-test.sh keeps that case.
+#
+# State: $MACHINE_CLAIM_DIR, default ~/.local/state/machine-claim. Not in any
+# repository or worktree, so every session on the machine sees the same claims.
+set -uo pipefail
+
+DIR="${MACHINE_CLAIM_DIR:-$HOME/.local/state/machine-claim}"
+NAME_RE='^[a-z][a-z0-9-]{0,31}$'
+WANT_MINUTES=30   # how long an owner's "wanted" mark holds without a claim
+
+die() { echo "machine-claim: $*" >&2; exit 64; }
+
+if [[ ${1:-} != --locked ]]; then
+  mkdir -p "$DIR" || die "can't create $DIR"
+  lock="$DIR/.lock"
+  if command -v perl >/dev/null 2>&1; then
+    exec perl -e 'use Fcntl qw(:flock); open(my $f, ">>", shift) or die "machine-claim: lock: $!\n";
+      flock($f, LOCK_EX) or die "machine-claim: lock: $!\n";
+      my $rc = system(@ARGV); exit($rc == -1 ? 70 : $rc >> 8);' "$lock" "$0" --locked "$@"
+  elif command -v python3 >/dev/null 2>&1; then
+    exec python3 -c 'import fcntl, subprocess, sys
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); sys.exit(subprocess.call(sys.argv[2:]))' "$lock" "$0" --locked "$@"
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock "$lock" "$0" --locked "$@"
+  fi
+  die "needs perl, python3 or flock for its lock; none is installed"
+fi
+shift
+
+now() { date +%s; }
+clock() { date -r "$1" '+%H:%M' 2>/dev/null || date -d "@$1" '+%H:%M'; }
+name() { [[ ${1:-} =~ $NAME_RE ]] || die "$2 must be a short lowercase name (letters, digits, dashes): '${1:-}'"; }
+
+# field <file> <key>: the value of "key value" in a file, or nothing.
+field() { [[ -f $1 ]] && awk -v k="$2" '$1 == k { print $2; exit }' "$1"; }
+
+# write <file> <lines...>: whole-file write through a rename.
+write() {
+  local f=$1 tmp; shift
+  tmp=$(mktemp "$f.XXXXXX") || return 1
+  printf '%s\n' "$@" >"$tmp" && mv -f "$tmp" "$f"
+}
+
+# holder <resource>: prints "who until owner" while a claim is live.
+holder() {
+  local c=$DIR/$1.claim who until
+  who=$(field "$c" who); until=$(field "$c" until)
+  [[ -n $who && $until =~ ^[0-9]+$ ]] && (( until > $(now) )) || return 1
+  echo "$who $until $(field "$c" owner)"
+}
+
+# wanted <resource>: prints who wants it, while the mark is fresh.
+wanted() {
+  local w=$DIR/$1.wanted who since
+  who=$(field "$w" who); since=$(field "$w" since)
+  [[ -n $who && $since =~ ^[0-9]+$ ]] && (( $(now) - since < WANT_MINUTES * 60 )) && echo "$who"
+}
+
+cmd=${1:-}; shift || true
+
+case $cmd in
+  take)
+    res=${1:-} who=${2:-} minutes=${3:-} owner=0
+    [[ ${4:-} == --owner ]] && owner=1
+    name "$res" resource; name "$who" who
+    [[ $minutes =~ ^[0-9]+$ ]] && (( minutes >= 1 && minutes <= 240 )) || die "minutes must be 1 to 240"
+    until=$(( $(now) + minutes * 60 ))
+    if h=$(holder "$res"); then
+      read -r hwho huntil _ <<<"$h"
+      if [[ $hwho == "$who" ]]; then
+        write "$DIR/$res.claim" "who $who" "until $until" "owner $owner" || die "can't write the claim"
+        echo "$res: still yours, now until $(clock "$until")"; exit 0
+      fi
+      if (( owner )); then
+        write "$DIR/$res.wanted" "who $who" "since $(now)" || die "can't write the mark"
+        echo "$res: held by $hwho until $(clock "$huntil"); marked as wanted for $who" >&2; exit 2
+      fi
+      echo "$res: held by $hwho until $(clock "$huntil")" >&2; exit 1
+    fi
+    w=$(wanted "$res")
+    if [[ -n $w && $w != "$who" ]]; then
+      echo "$res: free, but wanted by the owner's session $w; try again later" >&2; exit 1
+    fi
+    write "$DIR/$res.claim" "who $who" "until $until" "owner $owner" || die "can't write the claim"
+    [[ $w == "$who" ]] && rm -f "$DIR/$res.wanted"
+    echo "$res: yours until $(clock "$until")"
+    ;;
+  release)
+    res=${1:-} who=${2:-}; name "$res" resource; name "$who" who
+    [[ $(wanted "$res") == "$who" ]] && rm -f "$DIR/$res.wanted"
+    if h=$(holder "$res"); then
+      read -r hwho _ <<<"$h"
+      [[ $hwho == "$who" ]] || { echo "$res: held by $hwho, not by $who" >&2; exit 1; }
+      rm -f "$DIR/$res.claim"; echo "$res: released"; exit 0
+    fi
+    rm -f "$DIR/$res.claim"; echo "$res: was not held"; exit 1
+    ;;
+  check)
+    res=${1:-} who=${2:-}; name "$res" resource; name "$who" who
+    h=$(holder "$res") || { echo "$res: not held"; exit 1; }
+    read -r hwho huntil _ <<<"$h"
+    [[ $hwho == "$who" ]] || { echo "$res: held by $hwho until $(clock "$huntil")"; exit 1; }
+    w=$(wanted "$res")
+    [[ -n $w && $w != "$who" ]] && { echo "$res: yours until $(clock "$huntil"), but wanted by the owner's session $w: finish this step and release"; exit 3; }
+    echo "$res: yours until $(clock "$huntil")"
+    ;;
+  status)
+    seen=" "
+    for p in "$DIR"/*.claim "$DIR"/*.wanted; do
+      [[ -f $p ]] || continue
+      res=$(basename "$p"); res=${res%.*}
+      [[ $seen == *" $res "* ]] && continue
+      seen+="$res "
+      if h=$(holder "$res"); then
+        read -r hwho huntil howner <<<"$h"
+        line="$res: held by $hwho until $(clock "$huntil")"; [[ $howner == 1 ]] && line+=" (owner's session)"
+      else
+        line="$res: free"
+      fi
+      w=$(wanted "$res"); [[ -n $w ]] && line+="; wanted by the owner's session $w"
+      echo "$line"
+    done
+    [[ $seen == " " ]] && echo "nothing is claimed"
+    exit 0
+    ;;
+  *)
+    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+    exit 64
+    ;;
+esac
