@@ -290,6 +290,11 @@ OS these dotfiles actually target -- keep the harness free of GNU-only
 - **`.zprofile.d/55-mise.zsh`** - mise activation (must run after 50, since
   mise is installed via Homebrew and its tools must outrank brew's on PATH),
   shims appended as a fallback, plus a tripwire for a shadowed pinned tool
+- **`.zprofile.d/57-gh-app.zsh`** - sources `gh-app.zsh` from the external
+  `gh-app` repo (`~/.local/share/gh-app`), which defines a `gh()` function
+  that runs gh as this computer's own GitHub App. Each computer has its own
+  App, created with `gh-app setup`; nothing about it is tracked here.
+  `GH_AS_ME=1` bypasses it
 - **`.config/mise/config.toml`** - globally pinned CLI tools and language
   runtimes (exact versions; see the declarative principle above)
 - **`.zprofile.d/60-terminal-appearance.zsh`** - Claude-Dev Terminal.app

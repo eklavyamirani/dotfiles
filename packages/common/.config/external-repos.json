@@ -5,5 +5,12 @@
     "purpose": "Neovim configuration (kickstart-based, tracked in its own repo so it can be deployed standalone on machines that don't want the rest of dotfiles)",
     "branch": null,
     "git_options": []
+  },
+  {
+    "repo": "https://github.com/eklavyamirani/gh-app",
+    "local_dir": "~/.local/share/gh-app",
+    "purpose": "Runs gh and git as this computer's own GitHub App (each computer creates its own with `gh-app setup`); its own repo so machines without these dotfiles can use it too",
+    "branch": null,
+    "git_options": []
   }
 ]
