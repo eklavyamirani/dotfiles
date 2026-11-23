@@ -169,13 +169,16 @@ GUARD
   git config --global advice.detachedHead false
   git config --global --add safe.directory '*'
 
-  # Stand-ins for the two remotes bootstrap clones. Rewriting the URLs rather
+  # Stand-ins for the remotes bootstrap clones. Rewriting the URLs rather
   # than editing the manifests keeps bootstrap-steps.json and
-  # external-repos.json under test exactly as they ship.
+  # external-repos.json under test exactly as they ship. The gh-app stand-in
+  # has no gh-app.zsh, so 57-gh-app.zsh stays inert in the sandbox.
   origin_from_dir homebrew "$TESTS_DIR/stubs/homebrew"
   origin_new nvim-config
+  origin_new gh-app
   git config --global "url.file://$ORIGINS/homebrew.insteadOf" 'https://github.com/Homebrew/brew'
   git config --global "url.file://$ORIGINS/nvim-config.insteadOf" 'https://github.com/eklavyamirani/nvim-config'
+  git config --global "url.file://$ORIGINS/gh-app.insteadOf" 'https://github.com/eklavyamirani/gh-app'
 
   sandbox_checkout_repo
 }
