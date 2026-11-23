@@ -58,8 +58,9 @@ While a question waits on the owner, use the wait: run the cheapest check that r
 ## The shared machine
 
 Sessions share one computer. The owner's own sessions come first. Workers take and release claims on Docker
-and the local cluster with the platform's claim script; do not hand out windows by message when the script
-can do it. One Docker-heavy job at a time: three at once stalled the machine for an hour.
+and the local cluster with `machine-claim` (`machine-claim status` shows who holds what); do not hand out
+windows by message when the claim can do it. One Docker-heavy job at a time: three at once stalled the
+machine for an hour.
 
 ## Never
 
