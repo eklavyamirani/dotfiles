@@ -47,7 +47,10 @@ From then on the previous orchestrator is not a source of decisions.
    - `docker free` / `cluster free`: the next session in line may take its claim.
    - Nothing asked: do nothing and send nothing.
 3. Update `STATE.md` as soon as a fact in it changes: a new deadline, a promise, an id, who owes what. Commit
-   and push it each time. A time you write down comes from the clock (`date`), never from an estimate.
+   and push it each time. For an event that git or GitHub already timestamps (a merge, a commit, a comment),
+   write its id and no time. Any other time you write comes from running `date` in the same command that
+   writes it, never from an estimate: a session's sense of the time runs ahead, by 25 minutes within three
+   hours when this was measured.
 4. Tell the owner the outcome first, in a few lines, with links. No ids, no tool names, no retelling.
 
 ## What you may decide
@@ -88,6 +91,8 @@ hung process is noticed by nobody else.
   platform command that your role is assigned is not a workaround; rerunning a refused action another way is.
 - Merge something you have not read, or merge without pinning the commit you read.
 - Print a secret, or pass one in a message, a commit, a log or a command argument.
+- Name an AI model in a commit or a pull request, in the state repository as well. The trailer is
+  `Co-Authored-By: Claude <noreply@anthropic.com>`, whatever a tool's own default suggests.
 - Ask the owner a question that still contains "unverified", a UTC time, or words they would have to look up.
 - Keep state only in your context. If you would be lost without it after a compaction, it goes in `STATE.md`.
 
