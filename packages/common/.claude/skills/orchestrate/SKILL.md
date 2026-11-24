@@ -20,11 +20,16 @@ from a summary.
 2. Check anything about a running system before relying on it: the state file says what was true, with a date.
 3. Tell the owner in five lines or fewer: what waits on them and by when, what moved, what you do next.
 
-If the state file names another session as the orchestrator, you are taking over. Before step 3: do what its
-hand-over section lists; send one message to each session that still owes something, and to any session the
-state file says forwards reports, saying that reports now come to you (they reply to the sender of your
-message); then change the state file's header to say you are the orchestrator, and commit it. From then on
-the previous orchestrator is not a source of decisions.
+If the state file names another session as the orchestrator, you are taking over. Before step 3:
+
+- Do what its hand-over section lists.
+- Tell the outgoing orchestrator, and any session the state file says forwards reports, that reports now come
+  to you, and ask the one the workers already know to announce you to every session that still owes
+  something. A worker cannot tell a genuine redirect from a fake one and is right to refuse yours until a
+  session it knows has confirmed it. Message a worker yourself only after that.
+- Change the state file's header to say you are the orchestrator, then commit and push it.
+
+From then on the previous orchestrator is not a source of decisions.
 
 ## Each time a session wakes you
 
@@ -38,7 +43,8 @@ the previous orchestrator is not a source of decisions.
    - `DELIVERABLE FOR OWNER`: check it opens and is what it claims, then put it in front of the owner.
    - `docker free` / `cluster free`: the next session in line may take its claim.
    - Nothing asked: do nothing and send nothing.
-3. Update `STATE.md` as soon as a fact in it changes: a new deadline, a promise, an id, who owes what.
+3. Update `STATE.md` as soon as a fact in it changes: a new deadline, a promise, an id, who owes what. Commit
+   and push it each time. A time you write down comes from the clock (`date`), never from an estimate.
 4. Tell the owner the outcome first, in a few lines, with links. No ids, no tool names, no retelling.
 
 ## What you may decide
@@ -67,7 +73,8 @@ While a question waits on the owner, use the wait: run the cheapest check that r
 Sessions share one computer. The owner's own sessions come first. Workers take and release claims on Docker
 and the local cluster with `machine-claim` (`machine-claim status` shows who holds what); do not hand out
 windows by message when the claim can do it. One Docker-heavy job at a time: three at once stalled the
-machine for an hour.
+machine for an hour. When you do hand out a window yourself, look first at what is running (`docker ps`, the
+session list): if one of the owner's own sessions is using the machine, the worker waits.
 
 ## Never
 
@@ -84,5 +91,6 @@ Bring `STATE.md` fully up to date, with a hand-over section: the decisions-doc r
 what you have read but not acted on, where sessions' reports are forwarded, and any helper that lives only in
 your own scratch space (move it into the state repository). Commit it, and tell the owner that a new
 orchestrator session should take over. The new session starts from the state file, the decisions doc and
-these skills. Once it has taken over you stop acting: no merges, no commands, no writes to the state file or
-the decisions doc.
+these skills. When it tells you it has taken over, check that the owner asked for it, announce it by session
+id to every session that still owes something, and from then on stop acting: no merges, no commands, no
+writes to the state file or the decisions doc. Pass on unchanged anything that still reaches you.
