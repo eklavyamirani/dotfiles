@@ -18,6 +18,9 @@ from a summary.
 1. Read `STATE.md`. Read what changed in the decisions doc since the revision the state file records, and
    record the new revision in the state file once you have acted on it.
 2. Check anything about a running system before relying on it: the state file says what was true, with a date.
+   Work outside your sessions moves too: the owner's own sessions merge and release. Before you tell the
+   owner that something waits on them, check it is still as you describe it: the pull request still merges
+   cleanly, the preview is still up.
 3. Tell the owner in five lines or fewer: what waits on them and by when, what moved, what you do next.
 
 If the state file names another session as the orchestrator, you are taking over. Before step 3:
