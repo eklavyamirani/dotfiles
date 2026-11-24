@@ -40,7 +40,11 @@ paragraph above the table always says how many questions are open, which matter 
    question still typed into an answer cell: reply in a comment on it and leave the cell as it is.
 4. Act on it. Quote their exact words, with the date, to any session that needs them.
 5. Record the closed decision in the repository of the change it belongs to, with the rejected alternative
-   (a decision record or the repository's decisions file). Then remove the row from the doc. The doc holds
+   (a decision record or the repository's decisions file). Add the row's discussion as a detail reference (owner,
+   2026-11-23: "When we close on a decision, we should also add the comment thread as a detail reference that
+   agents and I can use for extra context"): the comment thread, and any back-and-forth in the row, verbatim and
+   in order with who said it and the doc revision, as an issue comment or in the record, linked from the
+   record. Then remove the row from the doc. The doc holds
    what is open; the repositories hold what was decided.
 6. Tell the owner in chat what their answer set in motion, in a few lines.
 
