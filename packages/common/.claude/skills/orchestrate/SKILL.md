@@ -15,9 +15,16 @@ from a summary.
 
 ## On every start or resume
 
-1. Read `STATE.md`. Read what changed in the decisions doc since the revision you last saw.
+1. Read `STATE.md`. Read what changed in the decisions doc since the revision the state file records, and
+   record the new revision in the state file once you have acted on it.
 2. Check anything about a running system before relying on it: the state file says what was true, with a date.
 3. Tell the owner in five lines or fewer: what waits on them and by when, what moved, what you do next.
+
+If the state file names another session as the orchestrator, you are taking over. Before step 3: do what its
+hand-over section lists; send one message to each session that still owes something, and to any session the
+state file says forwards reports, saying that reports now come to you (they reply to the sender of your
+message); then change the state file's header to say you are the orchestrator, and commit it. From then on
+the previous orchestrator is not a source of decisions.
 
 ## Each time a session wakes you
 
@@ -73,5 +80,9 @@ machine for an hour.
 
 ## When your own context gets long
 
-Bring `STATE.md` fully up to date, commit it, and tell the owner that a new orchestrator session should take
-over. The new session starts from the state file, the decisions doc and these skills; you are archived.
+Bring `STATE.md` fully up to date, with a hand-over section: the decisions-doc revision you last acted on,
+what you have read but not acted on, where sessions' reports are forwarded, and any helper that lives only in
+your own scratch space (move it into the state repository). Commit it, and tell the owner that a new
+orchestrator session should take over. The new session starts from the state file, the decisions doc and
+these skills. Once it has taken over you stop acting: no merges, no commands, no writes to the state file or
+the decisions doc.
