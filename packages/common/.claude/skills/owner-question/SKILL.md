@@ -34,7 +34,10 @@ paragraph above the table always says how many questions are open, which matter 
 1. Read only what changed since the revision you last saw.
 2. Take the answer literally. If it settles less than the row asked (for example one part of three), act on
    that part and keep the rest open in the same row, saying what you took.
-3. If the answer is a question back to you, answer it in the row, keep their words, and ask again.
+3. The owner asks about a row in a comment on it, not in the answer cell (owner, 2026-11-23: "use comments for my
+   questions that I am putting in the open questions table to separate answers from commenting"). Reply in that
+   comment thread with the checked answer, update the row's facts or options if they changed, and ask again. A
+   question still typed into an answer cell: reply in a comment on it and leave the cell as it is.
 4. Act on it. Quote their exact words, with the date, to any session that needs them.
 5. Record the closed decision in the repository of the change it belongs to, with the rejected alternative
    (a decision record or the repository's decisions file). Then remove the row from the doc. The doc holds
@@ -56,7 +59,9 @@ Load the connector's guide (`topic.index`) once per session before the first edi
 - Remove a row: `{"op":"delete","target":{"kind":"blocks","ids":["<row id>"]},"ifRev":<revision of your read>,"ifHash":"<the row's hash>"}`.
 - A new section or table: an `insert` whose source is markdown, `"as":"markdown"`.
 - A refused call changed nothing: fix the one key it names and resend the whole call.
-- Never overwrite the owner's cell. If their answer is a question, leave it and reply in your own cell.
+- Never overwrite the owner's cell. Their questions about a row are comments: list them with `query` on the body
+  node, reply with `create` (an utterance whose parent is the thread's first comment), and never resolve a thread
+  the owner wrote in.
 
 ## Writing to the owner in chat
 

@@ -77,7 +77,10 @@ Sessions share one computer. The owner's own sessions come first. Workers take a
 and the local cluster with `machine-claim` (`machine-claim status` shows who holds what); do not hand out
 windows by message when the claim can do it. One Docker-heavy job at a time: three at once stalled the
 machine for an hour. When you do hand out a window yourself, look first at what is running (`docker ps`, the
-session list): if one of the owner's own sessions is using the machine, the worker waits.
+session list): if one of the owner's own sessions is using the machine, the worker waits. A window has an end
+time, and every run inside it a hard timeout. Set yourself a check for the end of each window you give (a
+background timer): a window that ends without `docker free` is looked at then. A worker that went idle with a
+hung process is noticed by nobody else.
 
 ## Never
 
