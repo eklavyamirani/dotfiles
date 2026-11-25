@@ -53,6 +53,15 @@ From then on the previous orchestrator is not a source of decisions.
    hours when this was measured.
 4. Tell the owner the outcome first, in a few lines, with links. No ids, no tool names, no retelling.
 
+## Dates you have written down
+
+An idle session keeps no promise: you act only when something wakes you. When you write a dated step into the
+state file (a preview that expires, "if unanswered by then, do this"), set a background timer in the same step
+that wakes you at that time. A timer does not survive a restart of the app or of your session, so on every
+start set the timers again for every date in the state file that is still ahead. In the second test of this
+workflow the session sat idle for a day, with a deadline it had written down an hour away and nothing set to
+wake it.
+
 ## What you may decide
 
 The owner's written limits are in `STATE.md`. The principle behind them: decide what is reversible and inside
